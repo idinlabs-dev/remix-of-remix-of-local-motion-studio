@@ -3,7 +3,7 @@
 
 import { pickScene, type Composition } from "@/lib/engine/types";
 import { wordTimings } from "@/lib/engine/timing";
-import { drawElement, PALETTES } from "@/lib/templates/kit";
+import { drawElement, PRIMARY_PALETTE, type Palette } from "@/lib/templates/kit";
 
 export interface RenderAssets {
   bg?: CanvasImageSource | null;

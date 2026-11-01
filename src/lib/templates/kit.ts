@@ -19,6 +19,16 @@ export const PALETTES: Palette[] = [
   { ink: "#1d3b2a", paper: "#f9f8ef", marker: "#d94f2b", teal: "#1f6f8b", red: "#a63d40", grid: "#9db6a7" },
 ];
 
+/** Palet default yang selalu terdefinisi — dipakai renderer & fallback. */
+export const PRIMARY_PALETTE: Palette = PALETTES[0] ?? {
+  ink: "#1e2a4a",
+  paper: "#fcfbf6",
+  marker: "#f2761b",
+  teal: "#0e7c7b",
+  red: "#c73e3a",
+  grid: "#9aa7c9",
+};
+
 /** Katalog untuk AI: daftar elemen + deskripsi bahasa Indonesia. */
 export const CATALOG: { kind: ElKind; description: string }[] = [
   { kind: "title", description: "Judul besar di bagian atas canvas, muncul dengan efek pop. Cocok untuk pembuka atau nama bagian." },
@@ -309,7 +319,7 @@ export function drawElement(
 ) {
   const { W, H, palette } = layout;
   const variant = Math.max(0, el.variant ?? index);
-  const accent = [palette.marker, palette.teal, palette.red, palette.ink][variant % 4];
+  const accent = [palette.marker, palette.teal, palette.red, palette.ink][variant % 4] ?? palette.ink;
   const p = elementProgress(index, sceneTime);
   if (p <= 0.001) return;
   const scale = el.scale ?? 1;

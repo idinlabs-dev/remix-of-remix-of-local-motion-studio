@@ -47,7 +47,10 @@ export function computeSilences(
   for (let i = 0; i < windows; i++) {
     let sum = 0;
     const offset = i * window;
-    for (let j = 0; j < window; j++) sum += samples[offset + j] * samples[offset + j];
+    for (let j = 0; j < window; j++) {
+      const v = samples[offset + j] ?? 0;
+      sum += v * v;
+    }
     quiet.push(Math.sqrt(sum / window) < threshold);
   }
   const gaps: Silence[] = [];
