@@ -11,15 +11,7 @@ export const ASPECT_DIMENSIONS: Record<Aspect, { width: number; height: number }
 
 /** Elemen visual yang bisa dipilih AI — dideskripsikan di CATALOG (kit.ts). */
 export type ElKind =
-  | "title"
-  | "illustration"
-  | "flow"
-  | "label"
-  | "bubble"
-  | "emphasize"
-  | "outro"
-  | "badge"
-  | "list";
+  "title" | "illustration" | "flow" | "label" | "bubble" | "emphasize" | "outro" | "badge" | "list";
 
 export type Entrance = "left" | "right" | "top" | "bottom";
 

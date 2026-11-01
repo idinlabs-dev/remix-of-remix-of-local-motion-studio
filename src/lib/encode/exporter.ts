@@ -41,10 +41,22 @@ export function pickProfileFromSupport(support: {
   opus: boolean;
 }): EncodeProfile | null {
   if (support.avc && support.aac) {
-    return { videoCodec: "avc", audioCodec: "aac", container: "mp4", mime: "video/mp4", ext: "mp4" };
+    return {
+      videoCodec: "avc",
+      audioCodec: "aac",
+      container: "mp4",
+      mime: "video/mp4",
+      ext: "mp4",
+    };
   }
   if (support.vp9 && support.opus) {
-    return { videoCodec: "vp9", audioCodec: "opus", container: "webm", mime: "video/webm", ext: "webm" };
+    return {
+      videoCodec: "vp9",
+      audioCodec: "opus",
+      container: "webm",
+      mime: "video/webm",
+      ext: "webm",
+    };
   }
   return null;
 }
@@ -87,7 +99,9 @@ export async function renderComposition(options: RenderOptions): Promise<RenderR
   const { comp, assets, audio, onProgress, signal } = options;
   const profile = await chooseEncodeProfile();
   if (!profile) {
-    throw new Error("Browser ini tidak mendukung encode video (WebCodecs). Coba Chrome atau Edge versi baru.");
+    throw new Error(
+      "Browser ini tidak mendukung encode video (WebCodecs). Coba Chrome atau Edge versi baru.",
+    );
   }
   onProgress?.({ phase: "preparing", frame: 0, totalFrames: 0 });
 
@@ -196,7 +210,9 @@ export async function renderComposition(options: RenderOptions): Promise<RenderR
 
 /** AudioBuffer dari Blob audio — decode lokal di device (Web Audio). */
 export async function decodeAudio(blob: Blob): Promise<AudioBuffer> {
-  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const Ctx =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new Ctx();
   try {
     const buf = await ctx.decodeAudioData(await blob.arrayBuffer());

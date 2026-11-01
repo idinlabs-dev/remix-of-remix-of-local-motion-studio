@@ -172,7 +172,14 @@ function drawSubtitle(
       if (isActive) {
         ctx.fillStyle = palette.marker;
         ctx.globalAlpha = 0.9;
-        roundRectPath(ctx, x - fontSize * 0.18, y - fontSize * 0.62, w + fontSize * 0.36, fontSize * 1.24, fontSize * 0.22);
+        roundRectPath(
+          ctx,
+          x - fontSize * 0.18,
+          y - fontSize * 0.62,
+          w + fontSize * 0.36,
+          fontSize * 1.24,
+          fontSize * 0.22,
+        );
         ctx.fill();
         ctx.globalAlpha = 1;
       }
@@ -185,7 +192,11 @@ function drawSubtitle(
 
 function roundRectPath(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
 ) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
