@@ -129,7 +129,7 @@ function drawSubtitle(
   time: number,
   W: number,
   H: number,
-  palette: (typeof PALETTES)[number],
+  palette: Palette,
 ) {
   const words = wordTimings(text, sceneStart, sceneEnd - sceneStart);
   if (words.length === 0) return;
