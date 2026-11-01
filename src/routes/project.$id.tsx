@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { planScenes, transcribeAudio, type PlanResponse, type TranscribeResponse } from "@/lib/ai/ai.functions";
 import { applyPlan, scenesFromTimings, genericScene } from "@/lib/engine/planner";
 import { buildFromTranscript, buildTimings, computeSilences, splitSentences, type TimedSentence } from "@/lib/engine/timing";
-import { ASPECT_DIMENSIONS, type Aspect, type Composition, type TimedSentence as _TS } from "@/lib/engine/types";
+import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
 import { decodeAudio, renderComposition, type RenderProgress } from "@/lib/encode/exporter";
 import { getMedia, getProject, listRenders, putMedia, putRender, saveProject, type MediaRecord, type RenderRecord } from "@/lib/storage/db";
 
@@ -428,7 +428,7 @@ function EditorPage() {
             />
             <div className="mt-3 flex flex-wrap gap-2">
               <Button variant="outline" size="sm" className="font-semibold" onClick={() => void transcribeNow()} disabled={busy !== null || !audioRec}>
-                <Wand2 className="size-4" /> {busy === "transcribe" ? "Men transkrip…" : "Auto-transkrip (AI)"}
+                <Wand2 className="size-4" /> {busy === "transcribe" ? "Mentranskrip…" : "Auto-transkrip (AI)"}
               </Button>
               <Button size="sm" className="font-semibold" onClick={() => void syncTimeline()} disabled={busy !== null}>
                 <Sparkles className="size-4" /> Sinkron waktu
