@@ -95,8 +95,9 @@ export function buildTimings(
     // Pilih boundary yang paling merata di antara midpoint yang tersedia.
     for (let i = 1; i <= boundariesNeeded; i++) {
       const ideal = (i / (boundariesNeeded + 1)) * duration;
-      let best = midpoints[0];
-      let bestDist = Math.abs(midpoints[0] - ideal);
+      const first = midpoints[0] ?? ideal;
+      let best = first;
+      let bestDist = Math.abs(first - ideal);
       for (const m of midpoints) {
         const d = Math.abs(m - ideal);
         if (d < bestDist) {
@@ -113,7 +114,7 @@ export function buildTimings(
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     let acc = 0;
     for (let i = 0; i < boundariesNeeded; i++) {
-      acc += weights[i];
+      acc += weights[i] ?? 0;
       boundaries.push((acc / totalWeight) * duration);
     }
   }
@@ -121,12 +122,18 @@ export function buildTimings(
   const timings: TimedSentence[] = [];
   let cursor = 0;
   for (let i = 0; i < sentences.length; i++) {
-    const end = i < boundaries.length ? boundaries[i] : duration;
-    timings.push({ text: sentences[i], start: cursor, end: Math.max(end, cursor + 0.3) });
-    cursor = timings[i].end;
+    const end = i < boundaries.length ? (boundaries[i] ?? duration) : duration;
+    const t: TimedSentence = {
+      text: sentences[i] ?? "",
+      start: cursor,
+      end: Math.max(end, cursor + 0.3),
+    };
+    timings.push(t);
+    cursor = t.end;
   }
   // Jaga agar kalimat terakhir menutup sampai durasi.
-  timings[timings.length - 1].end = Math.max(timings[timings.length - 1].end, duration);
+  const last = timings[timings.length - 1];
+  if (last) last.end = Math.max(last.end, duration);
   return timings;
 }
 

@@ -59,7 +59,7 @@ export function drawFrame(
 ) {
   const W = comp.width;
   const H = comp.height;
-  const palette = PALETTES[0];
+  const palette = PRIMARY_PALETTE;
 
   ctx.save();
   if (assets.bg && assets.bgWidth && assets.bgHeight) {
