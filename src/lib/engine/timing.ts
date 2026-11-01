@@ -167,7 +167,7 @@ export function wordTimings(
   const total = weights.reduce((a, b) => a + b, 0);
   let cursor = start;
   return words.map((w, i) => {
-    const span = (weights[i] / total) * duration;
+    const span = ((weights[i] ?? 2) / total) * duration;
     const t = { word: w, start: cursor, end: cursor + span };
     cursor += span;
     return t;

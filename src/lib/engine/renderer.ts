@@ -16,7 +16,7 @@ function drawGridBackground(
   W: number,
   H: number,
 ) {
-  const palette = PALETTES[0];
+  const palette = PRIMARY_PALETTE;
   ctx.fillStyle = palette.paper;
   ctx.fillRect(0, 0, W, H);
   const cell = W / 14;
