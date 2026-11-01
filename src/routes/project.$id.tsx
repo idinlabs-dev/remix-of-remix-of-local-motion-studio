@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { planScenes, transcribeAudio, type PlanResponse, type TranscribeResponse } from "@/lib/ai/ai.functions";
+import { planScenes, transcribeAudio } from "@/lib/ai/ai.functions";
+import type { PlanResponse, TranscribeResponse } from "@/lib/ai/schema";
 import { applyPlan, scenesFromTimings, genericScene } from "@/lib/engine/planner";
 import { buildFromTranscript, buildTimings, computeSilences, splitSentences, type TimedSentence } from "@/lib/engine/timing";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
@@ -136,7 +137,7 @@ function EditorPage() {
   const persist = useCallback(
     async (next: Composition) => {
       setComp(next);
-      await saveProject(next.id, JSON.stringify(next));
+      await saveProject(next, JSON.stringify(next));
     },
     [],
   );
@@ -304,7 +305,9 @@ function EditorPage() {
       if (audio && !decoded) setDecoded(audio);
       const result = await renderComposition({
         comp,
-        assets: { bg: bgBitmap ?? undefined, bgWidth: bgBitmap?.width, bgHeight: bgBitmap?.height },
+        assets: bgBitmap
+          ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
+          : {},
         audio,
         onProgress: setProgress,
         signal: abortRef.current.signal,

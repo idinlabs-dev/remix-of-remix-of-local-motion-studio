@@ -22,7 +22,14 @@ function genericElements(index: number, text: string): SceneElement[] {
   if (index === 0) {
     els.push({ kind: "title", text: firstWords, y: 0.14, variant: index % 4, from: "top" });
   } else {
-    els.push({ kind: "illustration", shape: SHAPE_NAMES[index % SHAPE_NAMES.length], y: 0.4, scale: 1, variant: index % 4, from: ENTRANCES[index % 4] });
+    els.push({
+      kind: "illustration",
+      shape: SHAPE_NAMES[index % SHAPE_NAMES.length] ?? "arrowFlow",
+      y: 0.4,
+      scale: 1,
+      variant: index % 4,
+      from: ENTRANCES[index % ENTRANCES.length] ?? "bottom",
+    });
     els.push({ kind: "label", text: keyTerm(text), y: 0.62, variant: (index + 1) % 4, from: "left" });
   }
   if (index % 3 === 2) {
@@ -62,17 +69,20 @@ export function applyPlan(comp: Composition, plan: ScenePlan): Composition {
   const scenes = comp.scenes.map((scene, i) => {
     const planned = plan.scenes[i];
     if (!planned) return scene;
-    const elements: SceneElement[] = planned.elements.map((el) => ({
-      kind: el.kind as ElKind,
-      shape: el.shape,
-      text: el.text,
-      x: el.x,
-      y: el.y,
-      scale: el.scale,
-      variant: el.variant,
-      from: el.from,
-    }));
-    return { ...scene, title: planned.title, elements };
+    const elements: SceneElement[] = planned.elements.map((el) => {
+      const out: SceneElement = { kind: el.kind as ElKind };
+      if (el.shape !== undefined) out.shape = el.shape;
+      if (el.text !== undefined) out.text = el.text;
+      if (el.x !== undefined) out.x = el.x;
+      if (el.y !== undefined) out.y = el.y;
+      if (el.scale !== undefined) out.scale = el.scale;
+      if (el.variant !== undefined) out.variant = el.variant;
+      if (el.from !== undefined) out.from = el.from;
+      return out;
+    });
+    const next: Scene = { ...scene, elements };
+    if (planned.title !== undefined) next.title = planned.title;
+    return next;
   });
   return { ...comp, scenes, updatedAt: Date.now() };
 }
