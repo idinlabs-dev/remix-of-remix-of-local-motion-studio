@@ -17,7 +17,6 @@ import {
 import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { planScenes, transcribeAudio } from "@/lib/ai/ai.functions";
 import type { PlanResponse, TranscribeResponse } from "@/lib/ai/schema";
@@ -449,7 +448,13 @@ function EditorPage() {
             <h2 className="mb-3 font-bold">Render</h2>
             <div className="mb-3 flex items-center justify-between text-sm">
               <span className="font-semibold">Subtitle kata-per-kata</span>
-              <Switch checked={comp.subtitleOn} onCheckedChange={(v) => void persist({ ...comp, subtitleOn: v, updatedAt: Date.now() })} />
+              <input
+                type="checkbox"
+                checked={comp.subtitleOn}
+                onChange={(e) => void persist({ ...comp, subtitleOn: e.target.checked, updatedAt: Date.now() })}
+                className="size-5 accent-[var(--primary)]"
+                aria-label="Subtitle kata-per-kata"
+              />
             </div>
             <Button className="w-full font-bold" onClick={() => void renderNow()} disabled={busy !== null || !ready}>
               <Film className="size-4" /> {busy === "render" ? "Merender…" : "Render video"}
