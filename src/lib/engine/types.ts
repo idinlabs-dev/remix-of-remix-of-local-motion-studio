@@ -53,6 +53,8 @@ export interface Composition {
   scenes: Scene[];
   bgMediaId?: string;
   subtitleOn: boolean;
+  /** Teks narasi lengkap — disimpan supaya editor bisa memuatnya kembali. */
+  narration?: string;
   createdAt: number;
   updatedAt: number;
 }
