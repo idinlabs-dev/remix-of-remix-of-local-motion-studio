@@ -13,28 +13,106 @@ export interface Palette {
 }
 
 export const PALETTES: Palette[] = [
-  { ink: "#1e2a4a", paper: "#fcfbf6", marker: "#f2761b", teal: "#0e7c7b", red: "#c73e3a", grid: "#9aa7c9" },
-  { ink: "#22303f", paper: "#fbfaf4", marker: "#e0483e", teal: "#2b7a78", red: "#b3403b", grid: "#a3aecb" },
-  { ink: "#2a2340", paper: "#fcf9f2", marker: "#d8871f", teal: "#3a7d5c", red: "#c04a6b", grid: "#a9a0c4" },
-  { ink: "#1d3b2a", paper: "#f9f8ef", marker: "#d94f2b", teal: "#1f6f8b", red: "#a63d40", grid: "#9db6a7" },
+  {
+    ink: "#1e2a4a",
+    paper: "#fcfbf6",
+    marker: "#f2761b",
+    teal: "#0e7c7b",
+    red: "#c73e3a",
+    grid: "#9aa7c9",
+  },
+  {
+    ink: "#22303f",
+    paper: "#fbfaf4",
+    marker: "#e0483e",
+    teal: "#2b7a78",
+    red: "#b3403b",
+    grid: "#a3aecb",
+  },
+  {
+    ink: "#2a2340",
+    paper: "#fcf9f2",
+    marker: "#d8871f",
+    teal: "#3a7d5c",
+    red: "#c04a6b",
+    grid: "#a9a0c4",
+  },
+  {
+    ink: "#1d3b2a",
+    paper: "#f9f8ef",
+    marker: "#d94f2b",
+    teal: "#1f6f8b",
+    red: "#a63d40",
+    grid: "#9db6a7",
+  },
 ];
+
+/** Palet default yang selalu terdefinisi — dipakai renderer & fallback. */
+export const PRIMARY_PALETTE: Palette = PALETTES[0] ?? {
+  ink: "#1e2a4a",
+  paper: "#fcfbf6",
+  marker: "#f2761b",
+  teal: "#0e7c7b",
+  red: "#c73e3a",
+  grid: "#9aa7c9",
+};
 
 /** Katalog untuk AI: daftar elemen + deskripsi bahasa Indonesia. */
 export const CATALOG: { kind: ElKind; description: string }[] = [
-  { kind: "title", description: "Judul besar di bagian atas canvas, muncul dengan efek pop. Cocok untuk pembuka atau nama bagian." },
-  { kind: "illustration", description: "Ilustrasi doodle sederhana di tengah. shape wajib diisi: plane (pesawat), wing (sayap), person (orang berlari), cloud, arrowUp (panah ke atas), box (kardus/triplek), fuel (tangki bahan bakar), engine (mesin), bird, flag, star, wheel, paperPlane, arrowFlow (aliran angin)." },
-  { kind: "flow", description: "Beberapa panah aliran yang bergerak menyamping, melambangkan angin/aliran/urutan proses." },
-  { kind: "label", description: "Label istilah dengan garis penunjuk, misalnya 'gaya angkat', 'tekanan kecil'. text wajib." },
-  { kind: "bubble", description: "Gelembung pertanyaan gaya ngobrol, cocok untuk hook pembuka. text wajib." },
-  { kind: "emphasize", description: "Sorotan lingkaran tangan (sketsa) di sekitar teks/objek penting. text opsional." },
-  { kind: "list", description: "Daftar 2-3 poin singkat dengan bullet sketsa. text = poin dipisah ' | '." },
-  { kind: "badge", description: "Stiker kecil bertuliskan kata kunci, miring sedikit. text wajib." },
+  {
+    kind: "title",
+    description:
+      "Judul besar di bagian atas canvas, muncul dengan efek pop. Cocok untuk pembuka atau nama bagian.",
+  },
+  {
+    kind: "illustration",
+    description:
+      "Ilustrasi doodle sederhana di tengah. shape wajib diisi: plane (pesawat), wing (sayap), person (orang berlari), cloud, arrowUp (panah ke atas), box (kardus/triplek), fuel (tangki bahan bakar), engine (mesin), bird, flag, star, wheel, paperPlane, arrowFlow (aliran angin).",
+  },
+  {
+    kind: "flow",
+    description:
+      "Beberapa panah aliran yang bergerak menyamping, melambangkan angin/aliran/urutan proses.",
+  },
+  {
+    kind: "label",
+    description:
+      "Label istilah dengan garis penunjuk, misalnya 'gaya angkat', 'tekanan kecil'. text wajib.",
+  },
+  {
+    kind: "bubble",
+    description: "Gelembung pertanyaan gaya ngobrol, cocok untuk hook pembuka. text wajib.",
+  },
+  {
+    kind: "emphasize",
+    description: "Sorotan lingkaran tangan (sketsa) di sekitar teks/objek penting. text opsional.",
+  },
+  {
+    kind: "list",
+    description: "Daftar 2-3 poin singkat dengan bullet sketsa. text = poin dipisah ' | '.",
+  },
+  {
+    kind: "badge",
+    description: "Stiker kecil bertuliskan kata kunci, miring sedikit. text wajib.",
+  },
   { kind: "outro", description: "Kartu penutup dengan kalimat pamit. text wajib." },
 ];
 
 export const SHAPE_NAMES = [
-  "plane", "wing", "person", "cloud", "arrowUp", "box", "fuel", "engine",
-  "bird", "flag", "star", "wheel", "paperPlane", "arrowFlow",
+  "plane",
+  "wing",
+  "person",
+  "cloud",
+  "arrowUp",
+  "box",
+  "fuel",
+  "engine",
+  "bird",
+  "flag",
+  "star",
+  "wheel",
+  "paperPlane",
+  "arrowFlow",
 ] as const;
 
 function easeOutCubic(t: number) {
@@ -291,11 +369,16 @@ function elementProgress(globalIndex: number, sceneTime: number) {
 function entranceOffset(from: SceneElement["from"], p: number, W: number, H: number) {
   const d = (1 - p) * W * 0.35;
   switch (from) {
-    case "left": return { dx: -d, dy: 0 };
-    case "right": return { dx: d, dy: 0 };
-    case "top": return { dx: 0, dy: -d };
-    case "bottom": return { dx: 0, dy: d };
-    default: return { dx: 0, dy: (1 - p) * H * 0.04 };
+    case "left":
+      return { dx: -d, dy: 0 };
+    case "right":
+      return { dx: d, dy: 0 };
+    case "top":
+      return { dx: 0, dy: -d };
+    case "bottom":
+      return { dx: 0, dy: d };
+    default:
+      return { dx: 0, dy: (1 - p) * H * 0.04 };
   }
 }
 
@@ -309,7 +392,8 @@ export function drawElement(
 ) {
   const { W, H, palette } = layout;
   const variant = Math.max(0, el.variant ?? index);
-  const accent = [palette.marker, palette.teal, palette.red, palette.ink][variant % 4];
+  const accent =
+    [palette.marker, palette.teal, palette.red, palette.ink][variant % 4] ?? palette.ink;
   const p = elementProgress(index, sceneTime);
   if (p <= 0.001) return;
   const scale = el.scale ?? 1;
@@ -347,7 +431,7 @@ export function drawElement(
       const size = H * 0.06 * scale;
       ctx.globalAlpha = p;
       for (let i = 0; i < count; i++) {
-        const phase = ((sceneTime * 0.6 + i * 0.33) % 1);
+        const phase = (sceneTime * 0.6 + i * 0.33) % 1;
         const fx = (phase - 0.5) * W * 0.5;
         ctx.save();
         ctx.translate(fx, (i - 1) * size * 0.9);
@@ -419,7 +503,10 @@ export function drawElement(
       break;
     }
     case "list": {
-      const points = (el.text ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+      const points = (el.text ?? "")
+        .split("|")
+        .map((s) => s.trim())
+        .filter(Boolean);
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.font = `500 ${Math.round(H * 0.034 * scale)}px "Space Grotesk", sans-serif`;
@@ -475,7 +562,11 @@ export function drawElement(
 
 function roundRect(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
 ) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);

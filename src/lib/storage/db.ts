@@ -36,8 +36,10 @@ function openDb(): Promise<IDBDatabase> {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        if (!db.objectStoreNames.contains("projects")) db.createObjectStore("projects", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("media")) db.createObjectStore("media", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("projects"))
+          db.createObjectStore("projects", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("media"))
+          db.createObjectStore("media", { keyPath: "id" });
         if (!db.objectStoreNames.contains("renders")) {
           const store = db.createObjectStore("renders", { keyPath: "id" });
           store.createIndex("projectId", "projectId");
@@ -50,7 +52,11 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function tx<T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest): Promise<T> {
+function tx<T>(
+  store: string,
+  mode: IDBTransactionMode,
+  fn: (s: IDBObjectStore) => IDBRequest,
+): Promise<T> {
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
@@ -73,19 +79,49 @@ export interface ProjectMeta {
   hasAudio: boolean;
 }
 
-export async function saveProject(comp: { id: string; title: string; aspect: string; updatedAt: number; scenes: unknown[] }, compJson: string): Promise<void> {
-  await tx("projects", "readwrite", (s) => s.put({ id: comp.id, title: comp.title, aspect: comp.aspect, updatedAt: comp.updatedAt, sceneCount: comp.scenes.length, composition: compJson }));
+export async function saveProject(
+  comp: { id: string; title: string; aspect: string; updatedAt: number; scenes: unknown[] },
+  compJson: string,
+): Promise<void> {
+  await tx("projects", "readwrite", (s) =>
+    s.put({
+      id: comp.id,
+      title: comp.title,
+      aspect: comp.aspect,
+      updatedAt: comp.updatedAt,
+      sceneCount: comp.scenes.length,
+      composition: compJson,
+    }),
+  );
 }
 
 export async function getProject(id: string): Promise<string | null> {
-  const rec = await tx<{ composition: string } | undefined>("projects", "readonly", (s) => s.get(id));
+  const rec = await tx<{ composition: string } | undefined>("projects", "readonly", (s) =>
+    s.get(id),
+  );
   return rec?.composition ?? null;
 }
 
 export async function listProjects(): Promise<ProjectMeta[]> {
-  const all = await tx<{ id: string; title: string; aspect: string; updatedAt: number; sceneCount: number; composition: string }[]>("projects", "readonly", (s) => s.getAll());
+  const all = await tx<
+    {
+      id: string;
+      title: string;
+      aspect: string;
+      updatedAt: number;
+      sceneCount: number;
+      composition: string;
+    }[]
+  >("projects", "readonly", (s) => s.getAll());
   return all
-    .map((r) => ({ id: r.id, title: r.title, aspect: r.aspect, updatedAt: r.updatedAt, sceneCount: r.sceneCount, hasAudio: false }))
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      aspect: r.aspect,
+      updatedAt: r.updatedAt,
+      sceneCount: r.sceneCount,
+      hasAudio: false,
+    }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 

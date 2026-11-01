@@ -3,7 +3,7 @@
 
 import { pickScene, type Composition } from "@/lib/engine/types";
 import { wordTimings } from "@/lib/engine/timing";
-import { drawElement, PALETTES } from "@/lib/templates/kit";
+import { drawElement, PRIMARY_PALETTE, type Palette } from "@/lib/templates/kit";
 
 export interface RenderAssets {
   bg?: CanvasImageSource | null;
@@ -16,7 +16,7 @@ function drawGridBackground(
   W: number,
   H: number,
 ) {
-  const palette = PALETTES[0];
+  const palette = PRIMARY_PALETTE;
   ctx.fillStyle = palette.paper;
   ctx.fillRect(0, 0, W, H);
   const cell = W / 14;
@@ -59,7 +59,7 @@ export function drawFrame(
 ) {
   const W = comp.width;
   const H = comp.height;
-  const palette = PALETTES[0];
+  const palette = PRIMARY_PALETTE;
 
   ctx.save();
   if (assets.bg && assets.bgWidth && assets.bgHeight) {
@@ -129,7 +129,7 @@ function drawSubtitle(
   time: number,
   W: number,
   H: number,
-  palette: (typeof PALETTES)[number],
+  palette: Palette,
 ) {
   const words = wordTimings(text, sceneStart, sceneEnd - sceneStart);
   if (words.length === 0) return;
@@ -172,7 +172,14 @@ function drawSubtitle(
       if (isActive) {
         ctx.fillStyle = palette.marker;
         ctx.globalAlpha = 0.9;
-        roundRectPath(ctx, x - fontSize * 0.18, y - fontSize * 0.62, w + fontSize * 0.36, fontSize * 1.24, fontSize * 0.22);
+        roundRectPath(
+          ctx,
+          x - fontSize * 0.18,
+          y - fontSize * 0.62,
+          w + fontSize * 0.36,
+          fontSize * 1.24,
+          fontSize * 0.22,
+        );
         ctx.fill();
         ctx.globalAlpha = 1;
       }
@@ -185,7 +192,11 @@ function drawSubtitle(
 
 function roundRectPath(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
 ) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
