@@ -25,8 +25,8 @@ describe("computeSilences", () => {
     const samples = new Float32Array([...loud, ...quiet, ...loud]);
     const gaps = computeSilences(samples, sr, { minGapSec: 0.25 });
     expect(gaps).toHaveLength(1);
-    expect(gaps[0].start).toBeGreaterThanOrEqual(0.9);
-    expect(gaps[0].end).toBeLessThanOrEqual(2.1);
+    expect(gaps[0]?.start).toBeGreaterThanOrEqual(0.9);
+    expect(gaps[0]?.end).toBeLessThanOrEqual(2.1);
   });
 
   it("tidak menemukan jeda saat audio padat", () => {
@@ -46,36 +46,36 @@ describe("buildTimings", () => {
     ];
     const timings = buildTimings(sentences, silences, 6);
     expect(timings).toHaveLength(3);
-    expect(timings[0].start).toBe(0);
-    expect(timings[0].end).toBeCloseTo(2.2, 5);
-    expect(timings[1].end).toBeCloseTo(4.2, 5);
-    expect(timings[2].end).toBe(6);
+    expect(timings[0]?.start).toBe(0);
+    expect(timings[0]?.end).toBeCloseTo(2.2, 5);
+    expect(timings[1]?.end).toBeCloseTo(4.2, 5);
+    expect(timings[2]?.end).toBe(6);
   });
 
   it("fallback berbobot panjang saat jeda kurang", () => {
     const timings = buildTimings(sentences, [], 9);
     expect(timings).toHaveLength(3);
-    expect(timings[0].end).toBeGreaterThan(0);
-    expect(timings[2].end).toBe(9);
+    expect(timings[0]?.end).toBeGreaterThan(0);
+    expect(timings[2]?.end).toBe(9);
     // urutan waktu tetap naik
     for (let i = 1; i < timings.length; i++) {
-      expect(timings[i].start).toBeGreaterThanOrEqual(timings[i - 1].end);
+      expect(timings[i]?.start).toBeGreaterThanOrEqual(timings[i - 1]?.end ?? 0);
     }
   });
 
   it("kalimat terakhir selalu menutup sampai durasi", () => {
     const timings = buildTimings(["Satu kalimat panjang sekali, ya."], [], 5);
-    expect(timings[timings.length - 1].end).toBe(5);
+    expect(timings.at(-1)?.end).toBe(5);
   });
 });
 
 describe("wordTimings", () => {
   it("menutup rentang tanpa celah", () => {
     const words = wordTimings("sayap pesawat melengkung ke atas", 10, 4);
-    expect(words[0].start).toBe(10);
-    expect(words[words.length - 1].end).toBeCloseTo(14, 5);
+    expect(words[0]?.start).toBe(10);
+    expect(words.at(-1)?.end).toBeCloseTo(14, 5);
     for (let i = 1; i < words.length; i++) {
-      expect(words[i].start).toBeCloseTo(words[i - 1].end, 5);
+      expect(words[i]?.start).toBeCloseTo(words[i - 1]?.end ?? 0, 5);
     }
   });
 });
