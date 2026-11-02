@@ -16,7 +16,7 @@ import {
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 function model(): string {
-  return process.env["GEMINI_MODEL"] || "gemini-flash-latest";
+  return process.env["GEMINI_MODEL"] || "gemini-3.8-flash";
 }
 
 async function callGemini(key: string, body: unknown): Promise<unknown> {
@@ -24,6 +24,7 @@ async function callGemini(key: string, body: unknown): Promise<unknown> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90_000),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
