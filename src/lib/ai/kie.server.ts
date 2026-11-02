@@ -15,21 +15,27 @@ export class KieError extends Error {
 
 function friendly(status: number, msg: string): KieError {
   if (status === 401 || status === 403) return new KieError(401, "Kode akses tidak valid atau sudah dinonaktifkan.");
-  if (status === 402) return new KieError(402, "Saldo kode akses habis. Hubungi admin untuk isi ulang.");
+  if (status === 402) return new KieError(402, "Saldo kredit akun Kie.ai untuk API key ini habis. Isi saldo Kie.ai untuk memakai fitur AI.");
   if (status === 429) return new KieError(429, "Server AI sedang sibuk. Coba lagi sebentar lagi.");
   return new KieError(status || 500, msg ? `Layanan AI error: ${msg.slice(0, 160)}` : "Layanan AI sedang bermasalah.");
 }
 
-/** Cek kode akses valid & masih punya saldo. */
-export async function checkKieKey(key: string): Promise<{ credits: number }> {
+/** Validasi API key Kie.ai; saldo dapat diwajibkan khusus sebelum panggilan AI. */
+export async function checkKieKey(
+  key: string,
+  options: { requireCredits?: boolean } = {},
+): Promise<{ credits: number }> {
   const res = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
     headers: { Authorization: `Bearer ${key}` },
   });
   const body = (await res.json().catch(() => null)) as { code?: number; msg?: string; data?: number } | null;
   const code = body?.code ?? res.status;
   if (!res.ok || code !== 200) throw friendly(code === 200 ? res.status : code, body?.msg ?? "");
-  const credits = Number(body?.data ?? 0);
-  if (!(credits > 0)) throw friendly(402, "");
+  const credits = body?.data;
+  if (typeof credits !== "number" || !Number.isFinite(credits) || credits < 0) {
+    throw friendly(500, "Respons saldo Kie.ai tidak berisi nilai kredit yang valid.");
+  }
+  if (options.requireCredits !== false && credits <= 0) throw friendly(402, "");
   return { credits };
 }
 
