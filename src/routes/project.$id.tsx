@@ -895,7 +895,7 @@ function EditorPage() {
                       window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
                     }}
                   >
-                    <Github className="size-4" /> Hubungkan GitHub
+                    <Github className="size-4" /> Aktifkan Render Cepat
                   </Button>
                 )}
               </div>

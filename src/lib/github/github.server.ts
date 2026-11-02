@@ -23,6 +23,7 @@ const SESSION_COOKIE = "__Host-ars_github";
 const STATE_COOKIE = "__Host-ars_github_state";
 const API_ROOT = "https://api.github.com";
 const API_VERSION = "2026-03-10";
+const GITHUB_APP_SLUG = "auto-remotion-studio-render";
 
 type GitHubConfig = {
   clientId: string;
@@ -245,11 +246,14 @@ export async function beginGitHubOAuth(request: Request): Promise<Response> {
     expiresAt: Date.now() + 10 * 60_000,
   };
   const signedState = await sealOAuthState(state, settings.sessionSecret);
-  const destination = new URL("https://github.com/login/oauth/authorize");
-  destination.searchParams.set("client_id", settings.clientId);
-  destination.searchParams.set("redirect_uri", settings.callbackUrl);
+  // Start from the App installation page. With GitHub App's
+  // "Request user authorization during installation" enabled, GitHub
+  // completes installation and OAuth in one guided flow instead of asking
+  // the creator to authorize first, install second, then authorize again.
+  const destination = new URL(
+    `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`,
+  );
   destination.searchParams.set("state", state.nonce);
-  destination.searchParams.set("allow_signup", "true");
   return new Response(null, {
     status: 302,
     headers: {
