@@ -17,7 +17,9 @@ export const verifyAccess = createServerFn({ method: "POST" })
     if (!parsed) return { ok: false, reason: "no-access", message: "Format kode akses tidak dikenali." };
     const { checkKieKey, KieError } = await import("./kie.server");
     try {
-      await checkKieKey(parsed.key);
+      // Saldo nol bukan berarti key tidak valid atau kuota paket habis.
+      // Saldo untuk pemanggilan AI diperiksa lagi di endpoint fitur AI.
+      await checkKieKey(parsed.key, { requireCredits: false });
       return { ok: true, plan: parsed.plan };
     } catch (err) {
       const status = err instanceof KieError ? err.status : 500;
