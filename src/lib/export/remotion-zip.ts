@@ -245,9 +245,9 @@ export const Main: React.FC<{ timeline: any }> = ({ timeline }) => {
         return (
           <Sequence key={scene.id} from={from} durationInFrames={dur}>
             <AbsoluteFill>
-              {spk === "full" && t.media.video ? <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+              {spk === "full" && t.media.video ? <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
               {spk === "pip" && t.media.video ? (<div style={{ position: "absolute", right: "5%", bottom: "28%", width: "30%", aspectRatio: "4 / 5", borderRadius: 30, overflow: "hidden", border: "8px solid #fff", boxShadow: "14px 14px 0 " + theme.accent }}>
-                <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>) : null}
+                <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>) : null}
               <SceneView scene={scene} theme={spk === "full" ? { ...theme, ink: "#fff" } : theme} font={font} U={U} />
               <Stickers scene={scene} theme={theme} U={U} />
               {t.subtitleOn ? <Subtitle scene={scene} theme={theme} mode={t.mode} U={U} /> : null}

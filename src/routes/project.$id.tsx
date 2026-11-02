@@ -7,11 +7,13 @@ import {
   Download,
   FileArchive,
   Film,
+  Github,
   ImagePlus,
   Music,
   RefreshCcw,
   Sparkles,
   Trash2,
+  Unplug,
   Upload,
   Video,
 } from "lucide-react";
@@ -40,6 +42,13 @@ import {
   type RenderProgress,
 } from "@/lib/encode/exporter";
 import { buildRemotionZip } from "@/lib/export/remotion-zip";
+import { unzipSync } from "fflate";
+import {
+  cancelGitHubRender,
+  disconnectGitHub,
+  getGitHubRenderStatus,
+  getGitHubStatus,
+} from "@/lib/github/github.functions";
 import {
   getMedia,
   getProject,
@@ -110,6 +119,13 @@ function EditorPage() {
   const [progress, setProgress] = useState<RenderProgress | null>(null);
   const [renders, setRenders] = useState<RenderRecord[]>([]);
   const [renderUrls, setRenderUrls] = useState<Record<string, string>>({});
+  const [githubStatus, setGithubStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    login?: string;
+    avatarUrl?: string;
+  }>({ configured: false, connected: false });
+  const [remoteMessage, setRemoteMessage] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -117,6 +133,29 @@ function EditorPage() {
   const videoInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const remoteRunRef = useRef<{ runId: number; tag: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const result = new URL(window.location.href).searchParams.get("github");
+    if (result) {
+      const current = new URL(window.location.href);
+      current.searchParams.delete("github");
+      window.history.replaceState({}, "", `${current.pathname}${current.search}${current.hash}`);
+      if (result === "connected") toast.success("GitHub tersambung. Render otomatis siap digunakan.");
+      else toast.error("Koneksi GitHub belum berhasil. Coba lagi.");
+    }
+    void getGitHubStatus()
+      .then((status) => {
+        if (active) setGithubStatus(status);
+      })
+      .catch(() => {
+        if (active) setGithubStatus({ configured: false, connected: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // ---- muat project & media ----
   useEffect(() => {
@@ -432,33 +471,104 @@ function EditorPage() {
     }
     setBusy("render");
     setProgress({ phase: "preparing", frame: 0, totalFrames: 0 });
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const audio =
-        decoded ??
-        (audioRec
-          ? await decodeAudio(audioRec.blob)
-          : videoRec
-            ? await decodeVideoAudio(videoRec.blob)
-            : null);
-      if (audio && !decoded) setDecoded(audio);
-      const result = await renderComposition({
-        comp,
-        assets: bgBitmap
-          ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
-          : {},
-        audio,
-        video: videoRec?.blob ?? null,
-        onProgress: setProgress,
-        signal: abortRef.current.signal,
-      });
+      let resultBlob: Blob;
+      let resultMime: string;
+      let resultName: string;
+      let resultMessage: string;
+      if (githubStatus.connected) {
+        setRemoteMessage("Menyiapkan video…");
+        const packageBlob = await buildRemotionZip(comp, {
+          audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
+          bg: bgRec ? { name: bgRec.name, blob: bgRec.blob } : null,
+          video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
+        });
+        if (packageBlob.size > 70 * 1024 * 1024) {
+          throw new Error("Ukuran media terlalu besar untuk render otomatis. Kurangi media atau gunakan render di perangkat ini.");
+        }
+        setRemoteMessage("Mengirim video…");
+        const startResponse = await fetch("/api/github/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/zip" },
+          body: packageBlob,
+          signal: controller.signal,
+        });
+        const startData = (await startResponse.json().catch(() => null)) as
+          | { runId?: number; tag?: string; error?: string }
+          | null;
+        if (!startResponse.ok || !startData?.runId || !startData.tag) {
+          throw new Error(startData?.error ?? "Render otomatis belum bisa dimulai.");
+        }
+        const remoteRun = { runId: startData.runId, tag: startData.tag };
+        remoteRunRef.current = remoteRun;
+        setRemoteMessage("Menunggu giliran render…");
+        const deadline = Date.now() + 90 * 60 * 1000;
+        let completed = false;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          if (controller.signal.aborted) throw new DOMException("Render dibatalkan", "AbortError");
+          const status = await getGitHubRenderStatus({ data: remoteRun });
+          if (status.status === "queued") {
+            setRemoteMessage("Menunggu giliran render…");
+          } else if (status.status === "in_progress") {
+            setRemoteMessage("Sedang membuat video…");
+          } else if (status.status === "completed") {
+            if (status.conclusion !== "success") throw new Error("Render otomatis gagal. Coba render lagi.");
+            completed = true;
+            break;
+          }
+        }
+        if (!completed) throw new Error("Render memerlukan waktu lebih lama dari batas yang diizinkan.");
+        setRemoteMessage("Mengambil hasil video…");
+        const artifactResponse = await fetch(
+          `/api/github/artifact?runId=${remoteRun.runId}&tag=${encodeURIComponent(remoteRun.tag)}`,
+          { signal: controller.signal },
+        );
+        if (!artifactResponse.ok) {
+          const detail = (await artifactResponse.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(detail?.error ?? "Video selesai tetapi belum bisa diunduh.");
+        }
+        const archive = unzipSync(new Uint8Array(await artifactResponse.arrayBuffer()));
+        const videoPath = Object.keys(archive).find((path) => path.endsWith("video.mp4"));
+        const videoBytes = videoPath ? archive[videoPath] : undefined;
+        if (!videoBytes?.byteLength) throw new Error("File video tidak ditemukan dalam hasil render.");
+        resultBlob = new Blob([Uint8Array.from(videoBytes).buffer], { type: "video/mp4" });
+        resultMime = "video/mp4";
+        resultName = `${comp.title}.mp4`;
+        resultMessage = "Render selesai — video siap diputar dan diunduh.";
+      } else {
+        const audio =
+          decoded ??
+          (audioRec
+            ? await decodeAudio(audioRec.blob)
+            : videoRec
+              ? await decodeVideoAudio(videoRec.blob)
+              : null);
+        if (audio && !decoded) setDecoded(audio);
+        const result = await renderComposition({
+          comp,
+          assets: bgBitmap
+            ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
+            : {},
+          audio,
+          video: videoRec?.blob ?? null,
+          onProgress: setProgress,
+          signal: controller.signal,
+        });
+        resultBlob = result.blob;
+        resultMime = result.profile.mime;
+        resultName = `${comp.title}.${result.profile.ext}`;
+        resultMessage = `Render selesai — ${result.profile.container.toUpperCase()}.`;
+      }
       await putRender({
         id: crypto.randomUUID(),
         projectId: comp.id,
-        name: `${comp.title}.${result.profile.ext}`,
-        mime: result.profile.mime,
-        blob: result.blob,
-        durationSec: result.durationSec,
+        name: resultName,
+        mime: resultMime,
+        blob: resultBlob,
+        durationSec: comp.duration,
       });
       markProjectUsed(comp.id);
       const rs = await listRenders(comp.id);
@@ -466,17 +576,16 @@ function EditorPage() {
       const urls: Record<string, string> = {};
       for (const r of rs) urls[r.id] = URL.createObjectURL(r.blob);
       setRenderUrls(urls);
-      toast.success(`Render selesai — ${result.profile.container.toUpperCase()}.`);
+      toast.success(resultMessage);
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError")
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError"))
         toast.info("Render dibatalkan.");
-      else
-        toast.error(
-          "Render gagal: browser ini mungkin tidak mendukung encode video. Coba Chrome/Edge terbaru.",
-        );
+      else toast.error(err instanceof Error ? `Render gagal: ${err.message}` : "Render gagal. Coba lagi.");
     } finally {
       setBusy(null);
       setProgress(null);
+      setRemoteMessage(null);
+      remoteRunRef.current = null;
       abortRef.current = null;
     }
   };
@@ -748,20 +857,70 @@ function EditorPage() {
             >
               <Film className="size-4" /> {busy === "render" ? "Merender…" : "Render video"}
             </Button>
+            {githubStatus.configured && (
+              <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
+                {githubStatus.connected ? (
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex min-w-0 items-center gap-2 font-semibold">
+                      <Github className="size-4 shrink-0" />
+                      <span className="truncate">Render otomatis aktif{githubStatus.login ? ` · @${githubStatus.login}` : ""}</span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        setBusy("github-disconnect");
+                        void disconnectGitHub()
+                          .then(() => {
+                            setGithubStatus({ configured: true, connected: false });
+                            toast.success("Akun GitHub diputuskan.");
+                          })
+                          .catch(() => toast.error("Koneksi GitHub belum bisa diputuskan."))
+                          .finally(() => setBusy(null));
+                      }}
+                    >
+                      <Unplug className="size-3.5" /> Putuskan
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full font-semibold"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      const target = `${window.location.pathname}${window.location.search}`;
+                      window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
+                    }}
+                  >
+                    <Github className="size-4" /> Hubungkan GitHub
+                  </Button>
+                )}
+              </div>
+            )}
             {busy === "render" && progress && (
               <div className="mt-3">
                 <Progress
                   value={progress.totalFrames ? (progress.frame / progress.totalFrames) * 100 : 0}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {progress.phase}{" "}
-                  {progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}
+                  {remoteMessage ?? `${progress.phase} ${progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}`}
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="mt-1"
-                  onClick={() => abortRef.current?.abort()}
+                  onClick={() => {
+                    abortRef.current?.abort();
+                    const remoteRun = remoteRunRef.current;
+                    if (remoteRun) {
+                      void cancelGitHubRender({ data: remoteRun }).catch(() => {
+                        toast.error("Pembatalan render belum bisa dikirim ke GitHub.");
+                      });
+                    }
+                  }}
                 >
                   Batalkan
                 </Button>

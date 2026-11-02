@@ -41,7 +41,7 @@ Fitur yang dirancang:
 
 ## Arsitektur
 
-Auto Remotion Studio menggunakan prinsip **device-side first**. Server tidak digunakan untuk merender video berukuran besar.
+Auto Remotion Studio menggunakan prinsip **local-first**. Secara default, video dirender di perangkat pengguna. Pengguna dapat memilih menghubungkan GitHub agar render Remotion dijalankan oleh GitHub Actions di akun mereka.
 
 ```text
 Browser pengguna
@@ -53,12 +53,14 @@ Browser pengguna
 │   └── Menggambar frame berdasarkan waktu
 ├── WebCodecs + Mediabunny
 │   └── Encode video dan mux audio
+├── GitHub Actions (opsional)
+│   └── Render Remotion di repo privat milik pengguna
 └── Server Functions
     ├── Verifikasi kode akses
     └── AI Creative Director via Kie.ai (opsional, untuk desain visual)
 ```
 
-File media, deteksi jeda, sinkron waktu, dan proses render tetap berada di device pengguna. Sinkron waktu tidak membuat transkrip dan tidak mengirim audio ke server atau layanan lain. Teks narasi disediakan pengguna; Kie.ai hanya dipanggil jika pengguna memilih desain visual AI.
+File media, deteksi jeda, dan sinkron waktu tetap berada di device pengguna. Render lokal tidak mengunggah project. Jika pengguna menghubungkan GitHub, paket Remotion dan media dikirim ke repo privat akun mereka untuk dirender; file input sementara dihapus setelah workflow selesai dan artifact video kedaluwarsa setelah satu hari. Sinkron waktu tidak membuat transkrip dan tidak mengirim audio ke server atau layanan lain. Teks narasi disediakan pengguna; Kie.ai hanya dipanggil jika pengguna memilih desain visual AI.
 
 ### Sinkronisasi naskah dan audio
 
@@ -79,6 +81,7 @@ Pengguna juga dapat mengimpor file `.srt`. Teks setiap subtitle menjadi teks sce
 - Mediabunny untuk mux MP4/WebM.
 - IndexedDB untuk project dan media lokal.
 - `localStorage` untuk kode akses, kuota, dan preferensi ringan.
+- GitHub App OAuth dan GitHub Actions untuk render Remotion opsional.
 - Claude Haiku 5.5 melalui endpoint Kie.ai untuk desain scene.
 - Vitest untuk pengujian otomatis.
 
@@ -139,6 +142,7 @@ src/
 ├── routes/
 │   ├── index.tsx               # Landing page, mode, pricing, kode akses
 │   ├── project.$id.tsx         # Editor project dan alur render
+│   └── api/github/             # OAuth, render dispatch, dan artifact proxy
 ├── lib/
 │   ├── access/
 │   │   ├── plans.ts            # Paket, kuota, dan access gate
@@ -160,6 +164,10 @@ src/
 │   │   └── types.ts              # Model Composition dan Scene
 │   ├── export/
 │   │   └── remotion-zip.ts      # Generator source project Remotion
+│   ├── github/
+│   │   ├── github.server.ts     # OAuth, token session, provisioning repo, dan render API
+│   │   ├── runner-template.ts   # Workflow GitHub Actions statis
+│   │   └── session.ts           # Cookie sesi terenkripsi dan OAuth state
 │   └── storage/
 │       └── db.ts                # IndexedDB dan preferensi localStorage
 └── test/                        # Test timing dan routing
@@ -175,7 +183,7 @@ Persyaratan:
 Clone repository dan install dependency:
 
 ```bash
-git clone https://github.com/wulanvlogaja-byte/remix-of-remix-of-local-motion-studio.git
+git clone https://github.com/idinlabs-dev/remix-of-remix-of-local-motion-studio.git
 cd remix-of-remix-of-local-motion-studio
 pnpm install
 ```
@@ -213,9 +221,21 @@ Contoh konfigurasi:
 ```env
 # Origin publik deployment; dipakai untuk canonical dan Open Graph URL.
 VITE_SITE_URL=https://domain-anda.example
+
+# Opsional: GitHub App untuk render GitHub Actions
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+GITHUB_APP_CALLBACK_URL=https://domain-anda.example/api/github/callback
+GITHUB_SESSION_SECRET= # openssl rand -hex 32
 ```
 
-Sinkron waktu dan render tidak memerlukan API key tambahan. Jika pengguna memilih **Rancang adegan (AI)**, request desain visual memakai Kie.ai key yang sudah ada di Kode Akses.
+Sinkron waktu dan render lokal tidak memerlukan API key tambahan. Jika pengguna memilih **Rancang adegan (AI)**, request desain visual memakai Kie.ai key yang sudah ada di Kode Akses.
+
+### Mengaktifkan render GitHub Actions
+
+Buat GitHub App untuk OAuth dan set callback URL tepat ke `GITHUB_APP_CALLBACK_URL`. Izin minimum yang dibutuhkan: **Repository creation: write** pada izin akun, serta **Contents: write**, **Workflows: write**, dan **Actions: write** untuk repo. Simpan client ID, client secret, dan session secret sebagai secret server-only pada platform deployment; jangan memakai prefiks `VITE_`.
+
+Saat user pertama kali tersambung, aplikasi otomatis membuat repo privat `auto-remotion-render` (atau nama alternatif jika nama tersebut sudah dipakai), lalu memasang workflow runner. User cukup menekan **Render video**; ketika GitHub terhubung, editor memakai Actions di akun mereka dan memasukkan MP4 hasilnya ke riwayat project lokal. Jika tidak terhubung, tombol yang sama tetap memakai renderer lokal.
 
 ## Perintah Development
 
