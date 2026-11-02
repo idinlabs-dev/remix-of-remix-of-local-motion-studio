@@ -108,6 +108,20 @@ function jsonHeaders(token?: string): HeadersInit {
   };
 }
 
+function githubPermissionMessage(path: string): string {
+  if (path === "/user/repos")
+    return "GitHub App belum punya izin membuat repository. Aktifkan Repository creation: Read and write, lalu hubungkan ulang GitHub.";
+  if (path.includes("/contents/.github/workflows"))
+    return "GitHub App belum punya izin memasang workflow render. Aktifkan Contents: Read and write serta Workflows: Read and write, lalu hubungkan ulang GitHub.";
+  if (path.includes("/actions/workflows"))
+    return "GitHub App belum punya izin menjalankan workflow. Aktifkan Actions: Read and write serta Workflows: Read and write, lalu hubungkan ulang GitHub.";
+  if (path.includes("/actions/"))
+    return "GitHub App belum punya izin membaca atau mengelola proses render. Aktifkan Actions: Read and write, lalu hubungkan ulang GitHub.";
+  if (path.includes("/releases") || path.includes("/git/refs"))
+    return "GitHub App belum punya izin mengelola paket render sementara. Aktifkan Contents: Read and write, lalu hubungkan ulang GitHub.";
+  return "Izin GitHub belum lengkap. Aktifkan izin GitHub App yang dibutuhkan, lalu hubungkan ulang GitHub.";
+}
+
 async function githubRequest<T>(
   session: GitHubSession,
   path: string,
@@ -133,7 +147,7 @@ async function githubRequest<T>(
       response.status === 401
         ? "Koneksi GitHub kedaluwarsa. Hubungkan ulang akun untuk melanjutkan."
         : response.status === 403
-          ? "Izin GitHub belum lengkap. Hubungkan ulang akun atau perbarui akses GitHub App."
+          ? githubPermissionMessage(path)
           : message;
     throw new GitHubIntegrationError(friendlyMessage, response.status);
   }
