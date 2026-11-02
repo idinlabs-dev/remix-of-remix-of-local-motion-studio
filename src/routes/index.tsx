@@ -18,17 +18,25 @@ import { formatRupiah, PLANS, remainingVideos, type PlanId } from "@/lib/access/
 import { formatCountdown, makeOrderId, msUntilJakartaMidnight } from "@/lib/access/promo";
 import { activateAccess, useAccess } from "@/lib/access/store";
 import { newComposition, type Aspect, type Composition, type Mode } from "@/lib/engine/types";
+import { SITE_DESCRIPTION, SITE_NAME, canonicalLink, socialUrlMeta } from "@/lib/seo";
 import { deleteProject, listProjects, saveProject, type ProjectMeta } from "@/lib/storage/db";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Auto Remotion Studio — Video Narasi Otomatis" },
-      { name: "description", content: "AI motion studio universal untuk explainer dan talking-head video." },
-      { property: "og:title", content: "Auto Remotion Studio" },
-      { property: "og:description", content: "Ubah narasi atau video pembicara menjadi motion video langsung di device." },
+      { title: `${SITE_NAME} — AI Motion Video Studio` },
+      { name: "description", content: SITE_DESCRIPTION },
+      { name: "keywords", content: "AI video editor, motion explainer, podcast editor, talking head, Remotion" },
+      { property: "og:title", content: `${SITE_NAME} — AI Motion Video Studio` },
+      { property: "og:description", content: SITE_DESCRIPTION },
+      { property: "og:site_name", content: SITE_NAME },
       { property: "og:type", content: "website" },
+      ...socialUrlMeta("/"),
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: `${SITE_NAME} — AI Motion Video Studio` },
+      { name: "twitter:description", content: SITE_DESCRIPTION },
     ],
+    links: canonicalLink("/"),
   }),
   component: Index,
 });

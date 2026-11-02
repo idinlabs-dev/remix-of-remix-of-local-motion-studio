@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo";
 
 function NotFoundComponent() {
   return (
@@ -79,14 +80,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: SITE_NAME },
+      { name: "description", content: SITE_DESCRIPTION },
+      { name: "author", content: SITE_NAME },
+      { name: "keywords", content: "AI video editor, motion graphics, explainer video, talking head, Remotion" },
+      { name: "theme-color", content: "#f2761b" },
+      { property: "og:title", content: SITE_NAME },
+      { property: "og:description", content: SITE_DESCRIPTION },
+      { property: "og:site_name", content: SITE_NAME },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: SITE_NAME },
+      { name: "twitter:description", content: SITE_DESCRIPTION },
     ],
     links: [
       {
@@ -110,7 +115,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="id">
       <head>
         <HeadContent />
       </head>

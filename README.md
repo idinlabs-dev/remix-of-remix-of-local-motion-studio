@@ -56,7 +56,7 @@ Browser pengguna
 └── Server Functions
     ├── Verifikasi kode akses
     ├── AI Creative Director via Kie.ai
-    └── Transkripsi audio via Lovable AI Gateway
+    └── Transkripsi audio via AI Gateway
 ```
 
 Dengan pendekatan ini, file media dan proses render tetap berada di device pengguna. Server hanya menangani panggilan AI yang diperlukan.
@@ -75,7 +75,7 @@ Dengan pendekatan ini, file media dan proses render tetap berada di device pengg
 - IndexedDB untuk project dan media lokal.
 - `localStorage` untuk kode akses, kuota, dan preferensi ringan.
 - Claude Haiku 5.5 melalui endpoint Kie.ai untuk desain scene.
-- Lovable AI Gateway untuk transkripsi audio.
+- AI Gateway untuk transkripsi audio.
 - Vitest untuk pengujian otomatis.
 
 ## Mesin Visual
@@ -209,6 +209,9 @@ cp .env.example .env
 Contoh konfigurasi:
 
 ```env
+# Origin publik deployment; dipakai untuk canonical dan Open Graph URL.
+VITE_SITE_URL=https://domain-anda.example
+
 # Model AI untuk deployment yang memakai provider Gemini lama/kompatibel.
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.8-flash
@@ -267,5 +270,5 @@ Pekerjaan lanjutan:
 - Pertahankan rendering lokal di browser selama memungkinkan.
 - Jangan mengekspos API key provider ke client.
 - Gunakan native checkbox untuk toggle editor. Radix Switch tidak digunakan karena pernah menyebabkan konflik duplicate React pada dev bundler.
-- Jangan rewrite history Git yang sudah dipush ke branch yang terhubung ke Lovable.
+- Jangan rewrite history Git yang sudah dipush ke branch utama.
 - Jalankan typecheck, build, dan test setelah perubahan lintas modul.
