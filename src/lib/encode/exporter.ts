@@ -3,6 +3,7 @@
 
 import {
   ALL_FORMATS,
+  AudioBufferSink,
   AudioSample,
   AudioSampleSource,
   BlobSource,
@@ -264,5 +265,45 @@ export async function decodeAudio(blob: Blob): Promise<AudioBuffer> {
     return buf;
   } finally {
     void ctx.close();
+  }
+}
+
+/** Decode track audio yang tertanam di footage video, sepenuhnya di browser. */
+export async function decodeVideoAudio(blob: Blob): Promise<AudioBuffer | null> {
+  const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryAudioTrack();
+    if (!track || !(await track.canDecode())) return null;
+    const chunks = [];
+    for await (const chunk of new AudioBufferSink(track).buffers()) {
+      if (chunk) chunks.push(chunk);
+    }
+    const first = chunks[0];
+    if (!first) return null;
+    const sampleRate = first.buffer.sampleRate;
+    const channels = first.buffer.numberOfChannels;
+    const start = first.timestamp;
+    const end = Math.max(...chunks.map((chunk) => chunk.timestamp + chunk.duration));
+    const length = Math.max(1, Math.ceil((end - start) * sampleRate));
+    const context = new AudioContext();
+    try {
+      const result = context.createBuffer(channels, length, sampleRate);
+      for (const chunk of chunks) {
+        const offset = Math.max(0, Math.round((chunk.timestamp - start) * sampleRate));
+        for (
+          let channel = 0;
+          channel < Math.min(channels, chunk.buffer.numberOfChannels);
+          channel++
+        ) {
+          const source = chunk.buffer.getChannelData(channel);
+          result.copyToChannel(source.subarray(0, Math.max(0, length - offset)), channel, offset);
+        }
+      }
+      return result;
+    } finally {
+      void context.close();
+    }
+  } finally {
+    input.dispose();
   }
 }

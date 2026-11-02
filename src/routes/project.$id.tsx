@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Download,
+  FileArchive,
   Film,
   ImagePlus,
   Music,
@@ -11,6 +12,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  Video,
   Wand2,
 } from "lucide-react";
 
@@ -20,13 +22,36 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { designScenes, transcribeChunks } from "@/lib/ai/ai.functions";
 import type { DesignResponse, TranscribeResponse } from "@/lib/ai/schema";
-import { useAccess } from "@/lib/access/store";
+import { checkAiGate, checkRenderGate } from "@/lib/access/plans";
+import { markProjectUsed, useAccess } from "@/lib/access/store";
 import { applyDesign, scenesFromTimings, genericScene } from "@/lib/engine/planner";
-import { alignChunks, buildTimings, chunkRanges, computeSilences, splitSentences, type TimedSentence } from "@/lib/engine/timing";
+import {
+  alignChunks,
+  buildTimings,
+  chunkRanges,
+  computeSilences,
+  splitSentences,
+  type TimedSentence,
+} from "@/lib/engine/timing";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
-import { decodeAudio, renderComposition, type RenderProgress } from "@/lib/encode/exporter";
+import {
+  decodeAudio,
+  decodeVideoAudio,
+  renderComposition,
+  type RenderProgress,
+} from "@/lib/encode/exporter";
+import { buildRemotionZip } from "@/lib/export/remotion-zip";
 import { toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
-import { getMedia, getProject, listRenders, putMedia, putRender, saveProject, type MediaRecord, type RenderRecord } from "@/lib/storage/db";
+import {
+  getMedia,
+  getProject,
+  listRenders,
+  putMedia,
+  putRender,
+  saveProject,
+  type MediaRecord,
+  type RenderRecord,
+} from "@/lib/storage/db";
 
 export const Route = createFileRoute("/project/$id")({
   head: () => ({
@@ -34,10 +59,15 @@ export const Route = createFileRoute("/project/$id")({
       { title: "Editor Project — Auto Remotion Studio" },
       {
         name: "description",
-        content: "Editor privat Auto Remotion Studio untuk menyusun timeline, preview, dan render video di device.",
+        content:
+          "Editor privat Auto Remotion Studio untuk menyusun timeline, preview, dan render video di device.",
       },
       { property: "og:title", content: "Editor Project — Auto Remotion Studio" },
-      { property: "og:description", content: "Editor privat untuk menyusun adegan, preview sinkron audio, dan render MP4 di browser." },
+      {
+        property: "og:description",
+        content:
+          "Editor privat untuk menyusun adegan, preview sinkron audio, dan render MP4 di browser.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "robots", content: "noindex, nofollow, noarchive" },
@@ -73,8 +103,10 @@ function EditorPage() {
   const [missing, setMissing] = useState(false);
   const [audioRec, setAudioRec] = useState<MediaRecord | null>(null);
   const [bgRec, setBgRec] = useState<MediaRecord | null>(null);
+  const [videoRec, setVideoRec] = useState<MediaRecord | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [bgUrl, setBgUrl] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [bgBitmap, setBgBitmap] = useState<ImageBitmap | null>(null);
   const [decoded, setDecoded] = useState<AudioBuffer | null>(null);
   const [narration, setNarration] = useState("");
@@ -85,6 +117,7 @@ function EditorPage() {
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -92,6 +125,7 @@ function EditorPage() {
   useEffect(() => {
     let urlAudio: string | null = null;
     let urlBg: string | null = null;
+    let urlVideo: string | null = null;
     let cancelled = false;
     void (async () => {
       const json = await getProject(id);
@@ -107,9 +141,13 @@ function EditorPage() {
         setMissing(true);
         return;
       }
-      const media = await Promise.all([getMedia(`${id}-audio`), getMedia(`${id}-bg`)]);
+      const media = await Promise.all([
+        getMedia(`${id}-audio`),
+        getMedia(`${id}-bg`),
+        getMedia(`${id}-video`),
+      ]);
       if (cancelled) return;
-      const [audio, bg] = media;
+      const [audio, bg, video] = media;
       if (audio) {
         setAudioRec(audio);
         urlAudio = URL.createObjectURL(audio.blob);
@@ -120,6 +158,11 @@ function EditorPage() {
         urlBg = URL.createObjectURL(bg.blob);
         setBgUrl(urlBg);
         void createImageBitmap(bg.blob).then((bmp) => !cancelled && setBgBitmap(bmp));
+      }
+      if (video) {
+        setVideoRec(video);
+        urlVideo = URL.createObjectURL(video.blob);
+        setVideoUrl(urlVideo);
       }
       const rs = await listRenders(id);
       if (cancelled) return;
@@ -132,25 +175,25 @@ function EditorPage() {
       cancelled = true;
       if (urlAudio) URL.revokeObjectURL(urlAudio);
       if (urlBg) URL.revokeObjectURL(urlBg);
+      if (urlVideo) URL.revokeObjectURL(urlVideo);
       for (const u of Object.values(renderUrls)) URL.revokeObjectURL(u);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const persist = useCallback(
-    async (next: Composition) => {
-      setComp(next);
-      await saveProject(next, JSON.stringify(next));
-    },
-    [],
-  );
+  const persist = useCallback(async (next: Composition) => {
+    setComp(next);
+    await saveProject(next, JSON.stringify(next));
+  }, []);
 
   if (missing) {
     return (
       <div className="grid-paper flex min-h-screen items-center justify-center px-4">
         <div className="max-w-sm rounded-xl border-2 border-foreground/20 bg-card p-8 text-center">
           <p className="font-bold">Project tidak ditemukan</p>
-          <p className="mt-1 text-sm text-muted-foreground">Mungkin sudah dihapus dari device ini.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Mungkin sudah dihapus dari device ini.
+          </p>
           <Button asChild className="mt-4">
             <Link to="/">
               <ArrowLeft className="size-4" /> Kembali
@@ -173,7 +216,14 @@ function EditorPage() {
   const onAudioFile = async (file: File) => {
     setBusy("audio");
     try {
-      const rec = { id: `${comp.id}-audio`, projectId: comp.id, kind: "audio" as const, name: file.name, mime: file.type || "audio/mpeg", blob: file };
+      const rec = {
+        id: `${comp.id}-audio`,
+        projectId: comp.id,
+        kind: "audio" as const,
+        name: file.name,
+        mime: file.type || "audio/mpeg",
+        blob: file,
+      };
       await putMedia(rec);
       setAudioRec({ ...rec, createdAt: Date.now() });
       setAudioUrl(URL.createObjectURL(file));
@@ -190,7 +240,14 @@ function EditorPage() {
   const onBgFile = async (file: File) => {
     setBusy("bg");
     try {
-      const rec = { id: `${comp.id}-bg`, projectId: comp.id, kind: "image" as const, name: file.name, mime: file.type || "image/jpeg", blob: file };
+      const rec = {
+        id: `${comp.id}-bg`,
+        projectId: comp.id,
+        kind: "image" as const,
+        name: file.name,
+        mime: file.type || "image/jpeg",
+        blob: file,
+      };
       await putMedia(rec);
       setBgRec({ ...rec, createdAt: Date.now() });
       setBgUrl(URL.createObjectURL(file));
@@ -198,6 +255,48 @@ function EditorPage() {
       toast.success("Background termuat.");
     } catch {
       toast.error("Gagal membaca gambar.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onVideoFile = async (file: File) => {
+    setBusy("video");
+    try {
+      const probeUrl = URL.createObjectURL(file);
+      const duration = await new Promise<number>((resolve, reject) => {
+        const probe = document.createElement("video");
+        probe.preload = "metadata";
+        probe.onloadedmetadata = () => {
+          resolve(probe.duration);
+          probe.src = "";
+          URL.revokeObjectURL(probeUrl);
+        };
+        probe.onerror = () => {
+          URL.revokeObjectURL(probeUrl);
+          reject(new Error("Video tidak dapat dibaca."));
+        };
+        probe.src = probeUrl;
+      });
+      const rec = {
+        id: `${comp.id}-video`,
+        projectId: comp.id,
+        kind: "video" as const,
+        name: file.name,
+        mime: file.type || "video/mp4",
+        blob: file,
+      };
+      await putMedia(rec);
+      setVideoRec({ ...rec, createdAt: Date.now() });
+      setVideoUrl(URL.createObjectURL(file));
+      const embeddedAudio = await decodeVideoAudio(file);
+      if (embeddedAudio) setDecoded(embeddedAudio);
+      await persist({ ...comp, duration, updatedAt: Date.now() });
+      toast.success(
+        `Footage termuat (${duration.toFixed(1)} detik)${embeddedAudio ? " dengan audio" : " tanpa track audio"}.`,
+      );
+    } catch {
+      toast.error("Gagal membaca video. Coba MP4 atau WebM dengan codec browser umum.");
     } finally {
       setBusy(null);
     }
@@ -215,38 +314,60 @@ function EditorPage() {
   };
 
   const syncTimeline = async () => {
-    const duration = decoded?.duration ?? Math.max(4, narration.split(/\s+/).filter(Boolean).length * 0.38);
+    const duration =
+      decoded?.duration ??
+      (videoRec
+        ? comp.duration
+        : Math.max(4, narration.split(/\s+/).filter(Boolean).length * 0.38));
     const timings = timingsFromNarration(duration);
     if (timings.length === 0) {
       toast.error("Tulis dulu teks narasinya.");
       return;
     }
-    await persist(scenesFromTimings(comp, timings));
+    await persist(
+      scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
+    );
     toast.success(`${timings.length} adegan tersusun.`);
   };
 
   const transcribeNow = async () => {
-    if (!audioRec) {
-      toast.error("Upload audio dulu untuk transkrip otomatis.");
+    if (!audioRec && !videoRec) {
+      toast.error("Upload audio atau footage dengan track audio untuk transkrip otomatis.");
       return;
     }
-    if (!access) {
-      toast.error("Masukkan Kode Akses dulu untuk memakai transkrip AI.");
+    const gate = checkAiGate(access, {
+      projectId: comp.id,
+      durationSec: decoded?.duration ?? comp.duration,
+      mode: comp.mode,
+    });
+    if (!gate.ok) {
+      toast.error(gate.message);
       return;
     }
-    if (audioRec.blob.size > MAX_TRANSCRIBE_BYTES) {
-      toast.error("Audio terlalu besar untuk transkrip (maks 18 MB). Potong dulu atau tempel teks manual.");
+    if (!access) return;
+    if (audioRec && audioRec.blob.size > MAX_TRANSCRIBE_BYTES) {
+      toast.error(
+        "Audio terlalu besar untuk transkrip (maks 18 MB). Potong dulu atau tempel teks manual.",
+      );
       return;
     }
     setBusy("transcribe");
     try {
-      const audio = decoded ?? (await decodeAudio(audioRec.blob));
+      const audio =
+        decoded ??
+        (audioRec ? await decodeAudio(audioRec.blob) : await decodeVideoAudio(videoRec!.blob));
+      if (!audio) {
+        toast.error("Footage tidak memiliki track audio yang bisa dibaca.");
+        return;
+      }
       if (!decoded) setDecoded(audio);
       const silences = computeSilences(audio.getChannelData(0), audio.sampleRate);
       const ranges = chunkRanges(silences, audio.duration);
       const mono16k = await toMono16k(audio);
       const chunks = wavChunksBase64(mono16k, ranges);
-      const res: TranscribeResponse = await transcribeChunks({ data: { code: access.code, chunks } });
+      const res: TranscribeResponse = await transcribeChunks({
+        data: { code: access.code, chunks },
+      });
       if (!res.ok) {
         toast.error("Transkrip gagal: " + res.message);
         return;
@@ -254,7 +375,10 @@ function EditorPage() {
       const timedChunks = ranges.map((range, i) => ({ ...range, text: res.texts[i] ?? "" }));
       const timings = alignChunks(timedChunks, silences, audio.duration);
       setNarration(timings.map((t) => t.text).join(" "));
-      await persist(scenesFromTimings(comp, timings));
+      await persist(
+        scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
+      );
+      markProjectUsed(comp.id);
       toast.success(`Transkrip: ${timings.length} kalimat.`);
     } catch {
       toast.error("Transkrip gagal — coba lagi.");
@@ -268,10 +392,16 @@ function EditorPage() {
       toast.error("Susun timeline dulu (sinkron waktu), baru rancang adegan.");
       return;
     }
-    if (!access) {
-      toast.error("Masukkan Kode Akses dulu untuk memakai AI Creative Director.");
+    const gate = checkAiGate(access, {
+      projectId: comp.id,
+      durationSec: comp.duration,
+      mode: comp.mode,
+    });
+    if (!gate.ok) {
+      toast.error(gate.message);
       return;
     }
+    if (!access) return;
     setBusy("plan");
     try {
       const res: DesignResponse = await designScenes({
@@ -287,6 +417,7 @@ function EditorPage() {
         return;
       }
       await persist(applyDesign(comp, res.plan));
+      markProjectUsed(comp.id);
       toast.success("Adegan dirancang AI.");
     } catch {
       toast.error("Gagal menyusun rencana adegan.");
@@ -299,7 +430,11 @@ function EditorPage() {
     const scene = comp.scenes[index];
     if (!scene) return;
     const total = comp.scenes.length;
-    const generic = genericScene(index, total, { text: scene.text, start: scene.start, end: scene.end });
+    const generic = genericScene(index, total, {
+      text: scene.text,
+      start: scene.start,
+      end: scene.end,
+    });
     const scenes = comp.scenes.map((s, i) => (i === index ? { ...generic, id: s.id } : s));
     await persist({ ...comp, scenes, updatedAt: Date.now() });
   };
@@ -320,11 +455,22 @@ function EditorPage() {
       toast.error("Susun timeline dulu sebelum render.");
       return;
     }
+    const gate = checkRenderGate(access, comp.duration, comp.mode, comp.id);
+    if (!gate.ok) {
+      toast.error(gate.message);
+      return;
+    }
     setBusy("render");
     setProgress({ phase: "preparing", frame: 0, totalFrames: 0 });
     abortRef.current = new AbortController();
     try {
-      const audio = decoded ?? (audioRec ? await decodeAudio(audioRec.blob) : null);
+      const audio =
+        decoded ??
+        (audioRec
+          ? await decodeAudio(audioRec.blob)
+          : videoRec
+            ? await decodeVideoAudio(videoRec.blob)
+            : null);
       if (audio && !decoded) setDecoded(audio);
       const result = await renderComposition({
         comp,
@@ -332,6 +478,7 @@ function EditorPage() {
           ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
           : {},
         audio,
+        video: videoRec?.blob ?? null,
         onProgress: setProgress,
         signal: abortRef.current.signal,
       });
@@ -343,6 +490,7 @@ function EditorPage() {
         blob: result.blob,
         durationSec: result.durationSec,
       });
+      markProjectUsed(comp.id);
       const rs = await listRenders(comp.id);
       setRenders(rs);
       const urls: Record<string, string> = {};
@@ -350,8 +498,12 @@ function EditorPage() {
       setRenderUrls(urls);
       toast.success(`Render selesai — ${result.profile.container.toUpperCase()}.`);
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") toast.info("Render dibatalkan.");
-      else toast.error("Render gagal: browser ini mungkin tidak mendukung encode video. Coba Chrome/Edge terbaru.");
+      if (err instanceof DOMException && err.name === "AbortError")
+        toast.info("Render dibatalkan.");
+      else
+        toast.error(
+          "Render gagal: browser ini mungkin tidak mendukung encode video. Coba Chrome/Edge terbaru.",
+        );
     } finally {
       setBusy(null);
       setProgress(null);
@@ -360,7 +512,31 @@ function EditorPage() {
   };
 
   const exportTimeline = () => {
-    download(`${comp.title}-timeline.json`, new Blob([JSON.stringify(comp, null, 2)], { type: "application/json" }));
+    download(
+      `${comp.title}-timeline.json`,
+      new Blob([JSON.stringify(comp, null, 2)], { type: "application/json" }),
+    );
+  };
+
+  const exportRemotion = async () => {
+    if (!access || access.plan !== "pro") {
+      toast.error("Ekspor project Remotion hanya tersedia untuk paket Pro Creator.");
+      return;
+    }
+    setBusy("zip");
+    try {
+      const zip = await buildRemotionZip(comp, {
+        audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
+        bg: bgRec ? { name: bgRec.name, blob: bgRec.blob } : null,
+        video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
+      });
+      download(`${comp.title}-remotion.zip`, zip);
+      toast.success("Project Remotion ZIP siap diunduh.");
+    } catch {
+      toast.error("Gagal membuat ZIP Remotion.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const importTimeline = async (file: File) => {
@@ -379,9 +555,34 @@ function EditorPage() {
 
   return (
     <div className="grid-paper min-h-screen pb-16">
-      <input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => e.target.files?.[0] && void onAudioFile(e.target.files[0])} />
-      <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && void onBgFile(e.target.files[0])} />
-      <input ref={importInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && void importTimeline(e.target.files[0])} />
+      <input
+        ref={audioInputRef}
+        type="file"
+        accept="audio/*"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && void onAudioFile(e.target.files[0])}
+      />
+      <input
+        ref={bgInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && void onBgFile(e.target.files[0])}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && void onVideoFile(e.target.files[0])}
+      />
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && void importTimeline(e.target.files[0])}
+      />
 
       <header className="border-b-2 border-foreground/15 bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
@@ -402,7 +603,9 @@ function EditorPage() {
                 key={a}
                 onClick={() => void changeAspect(a)}
                 className={`rounded-full border-2 px-3 py-1 text-xs font-bold ${
-                  comp.aspect === a ? "border-primary bg-primary text-primary-foreground" : "border-foreground/25 hover:border-foreground/60"
+                  comp.aspect === a
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-foreground/25 hover:border-foreground/60"
                 }`}
               >
                 {a}
@@ -416,18 +619,31 @@ function EditorPage() {
         {/* kolom kiri: media & narasi */}
         <div className="flex flex-col gap-4">
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
-            <h2 className="mb-3 flex items-center gap-2 font-bold"><Music className="size-4 text-primary" /> Audio narasi</h2>
-            <Button variant="outline" className="w-full font-semibold" onClick={() => audioInputRef.current?.click()} disabled={busy !== null}>
+            <h2 className="mb-3 flex items-center gap-2 font-bold">
+              <Music className="size-4 text-primary" /> Audio narasi
+            </h2>
+            <Button
+              variant="outline"
+              className="w-full font-semibold"
+              onClick={() => audioInputRef.current?.click()}
+              disabled={busy !== null}
+            >
               <Upload className="size-4" /> {audioRec ? audioRec.name : "Upload MP3/WAV"}
             </Button>
             {audioUrl && <audio src={audioUrl} controls className="mt-3 w-full" />}
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
-            <h2 className="mb-3 flex items-center gap-2 font-bold"><ImagePlus className="size-4 text-primary" /> Background (opsional)</h2>
+            <h2 className="mb-3 flex items-center gap-2 font-bold">
+              <ImagePlus className="size-4 text-primary" /> Background (opsional)
+            </h2>
             {bgUrl ? (
               <div className="relative">
-                <img src={bgUrl} alt="background" className="max-h-40 w-full rounded-lg object-cover" />
+                <img
+                  src={bgUrl}
+                  alt="background"
+                  className="max-h-40 w-full rounded-lg object-cover"
+                />
                 <button
                   aria-label="Ganti background"
                   className="absolute right-2 top-2 rounded-md bg-background/80 p-1.5"
@@ -437,14 +653,42 @@ function EditorPage() {
                 </button>
               </div>
             ) : (
-              <Button variant="outline" className="w-full font-semibold" onClick={() => bgInputRef.current?.click()} disabled={busy !== null}>
+              <Button
+                variant="outline"
+                className="w-full font-semibold"
+                onClick={() => bgInputRef.current?.click()}
+                disabled={busy !== null}
+              >
                 <Upload className="size-4" /> Upload gambar
               </Button>
             )}
           </section>
 
+          {comp.mode === "edit" && (
+            <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
+              <h2 className="mb-3 flex items-center gap-2 font-bold">
+                <Video className="size-4 text-primary" /> Footage pembicara
+              </h2>
+              <Button
+                variant="outline"
+                className="w-full font-semibold"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={busy !== null}
+              >
+                <Upload className="size-4" /> {videoRec ? videoRec.name : "Upload video MP4/WebM"}
+              </Button>
+              {videoUrl && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Footage tersimpan lokal; audio track dapat dipakai untuk sinkronisasi dan render.
+                </p>
+              )}
+            </section>
+          )}
+
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
-            <h2 className="mb-3 flex items-center gap-2 font-bold"><Film className="size-4 text-primary" /> Teks narasi</h2>
+            <h2 className="mb-3 flex items-center gap-2 font-bold">
+              <Film className="size-4 text-primary" /> Teks narasi
+            </h2>
             <Textarea
               value={narration}
               onChange={(e) => setNarration(e.target.value)}
@@ -453,18 +697,38 @@ function EditorPage() {
               className="resize-y"
             />
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" className="font-semibold" onClick={() => void transcribeNow()} disabled={busy !== null || !audioRec}>
-                <Wand2 className="size-4" /> {busy === "transcribe" ? "Mentranskrip…" : "Auto-transkrip (AI)"}
+              <Button
+                variant="outline"
+                size="sm"
+                className="font-semibold"
+                onClick={() => void transcribeNow()}
+                disabled={busy !== null || (!audioRec && !videoRec)}
+              >
+                <Wand2 className="size-4" />{" "}
+                {busy === "transcribe" ? "Mentranskrip…" : "Auto-transkrip (AI)"}
               </Button>
-              <Button size="sm" className="font-semibold" onClick={() => void syncTimeline()} disabled={busy !== null}>
+              <Button
+                size="sm"
+                className="font-semibold"
+                onClick={() => void syncTimeline()}
+                disabled={busy !== null}
+              >
                 <Sparkles className="size-4" /> Sinkron waktu
               </Button>
-              <Button size="sm" variant="secondary" className="font-semibold" onClick={() => void planWithAi()} disabled={busy !== null}>
-                <Sparkles className="size-4" /> {busy === "plan" ? "Merancang…" : "Rancang adegan (AI)"}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="font-semibold"
+                onClick={() => void planWithAi()}
+                disabled={busy !== null}
+              >
+                <Sparkles className="size-4" />{" "}
+                {busy === "plan" ? "Merancang…" : "Rancang adegan (AI)"}
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              "Sinkron waktu" memecah kalimat & menyelaraskan dari jeda audio (lokal). "Rancang adegan" memakai AI.
+              "Sinkron waktu" memecah kalimat & menyelaraskan dari jeda audio (lokal). "Rancang
+              adegan" memakai AI.
             </p>
           </section>
 
@@ -475,33 +739,68 @@ function EditorPage() {
               <input
                 type="checkbox"
                 checked={comp.subtitleOn}
-                onChange={(e) => void persist({ ...comp, subtitleOn: e.target.checked, updatedAt: Date.now() })}
+                onChange={(e) =>
+                  void persist({ ...comp, subtitleOn: e.target.checked, updatedAt: Date.now() })
+                }
                 className="size-5 accent-[var(--primary)]"
                 aria-label="Subtitle kata-per-kata"
               />
             </div>
-            <Button className="w-full font-bold" onClick={() => void renderNow()} disabled={busy !== null || !ready}>
+            <Button
+              className="w-full font-bold"
+              onClick={() => void renderNow()}
+              disabled={busy !== null || !ready}
+            >
               <Film className="size-4" /> {busy === "render" ? "Merender…" : "Render video"}
             </Button>
             {busy === "render" && progress && (
               <div className="mt-3">
-                <Progress value={progress.totalFrames ? (progress.frame / progress.totalFrames) * 100 : 0} />
+                <Progress
+                  value={progress.totalFrames ? (progress.frame / progress.totalFrames) * 100 : 0}
+                />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {progress.phase} {progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}
+                  {progress.phase}{" "}
+                  {progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}
                 </p>
-                <Button variant="ghost" size="sm" className="mt-1" onClick={() => abortRef.current?.abort()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => abortRef.current?.abort()}
+                >
                   Batalkan
                 </Button>
               </div>
             )}
             <div className="mt-3 flex gap-2">
-              <Button variant="outline" size="sm" className="flex-1 font-semibold" onClick={exportTimeline}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 font-semibold"
+                onClick={exportTimeline}
+              >
                 <Download className="size-4" /> Ekspor timeline
               </Button>
-              <Button variant="outline" size="sm" className="flex-1 font-semibold" onClick={() => importInputRef.current?.click()}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 font-semibold"
+                onClick={() => importInputRef.current?.click()}
+              >
                 <Upload className="size-4" /> Impor timeline
               </Button>
             </div>
+            {access?.plan === "pro" && (
+              <Button
+                variant="outline"
+                className="mt-3 w-full font-semibold"
+                onClick={() => void exportRemotion()}
+                disabled={busy !== null}
+              >
+                <FileArchive className="size-4" />{" "}
+                {busy === "zip" ? "Membuat ZIP…" : "Unduh project Remotion ZIP"}
+              </Button>
+            )}
           </section>
 
           {renders.length > 0 && (
@@ -512,8 +811,14 @@ function EditorPage() {
                   <li key={r.id} className="rounded-lg border border-border p-2">
                     <video src={renderUrls[r.id]} controls className="w-full rounded-md" />
                     <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{r.name} · {new Date(r.createdAt).toLocaleString("id-ID")}</span>
-                      <a href={renderUrls[r.id]} download={r.name} className="flex items-center gap-1 font-semibold text-primary">
+                      <span>
+                        {r.name} · {new Date(r.createdAt).toLocaleString("id-ID")}
+                      </span>
+                      <a
+                        href={renderUrls[r.id]}
+                        download={r.name}
+                        className="flex items-center gap-1 font-semibold text-primary"
+                      >
                         <Download className="size-3.5" /> Unduh
                       </a>
                     </div>
@@ -528,25 +833,43 @@ function EditorPage() {
         <div className="flex flex-col gap-6">
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
             <h2 className="mb-3 font-bold">Preview sinkron</h2>
-            <PreviewPlayer comp={comp} audioUrl={audioUrl} assets={bgBitmap ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height } : {}} />
+            <PreviewPlayer
+              comp={comp}
+              audioUrl={audioUrl}
+              videoUrl={videoUrl}
+              assets={
+                bgBitmap ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height } : {}
+              }
+            />
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
             <h2 className="mb-3 font-bold">Timeline adegan</h2>
             {comp.scenes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Belum ada adegan — tulis teks lalu klik "Sinkron waktu".</p>
+              <p className="text-sm text-muted-foreground">
+                Belum ada adegan — tulis teks lalu klik "Sinkron waktu".
+              </p>
             ) : (
               <ul className="flex flex-col gap-3">
                 {comp.scenes.map((scene, i) => (
                   <li key={scene.id} className="rounded-lg border border-border p-3">
                     <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary">#{i + 1}</span>
-                      <span>{scene.start.toFixed(1)}s – {scene.end.toFixed(1)}s</span>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary">
+                        #{i + 1}
+                      </span>
+                      <span>
+                        {scene.start.toFixed(1)}s – {scene.end.toFixed(1)}s
+                      </span>
                       <span className="truncate">
                         {scene.layout}
                         {scene.items?.length ? ` · ${scene.items.length} item` : ""}
                       </span>
-                      <Button variant="ghost" size="sm" className="ml-auto" onClick={() => void regenerateScene(i)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto"
+                        onClick={() => void regenerateScene(i)}
+                      >
                         <RefreshCcw className="size-3.5" /> Generik
                       </Button>
                     </div>

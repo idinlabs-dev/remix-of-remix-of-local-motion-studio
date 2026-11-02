@@ -11,28 +11,35 @@ import { Pause, Play, RotateCcw } from "lucide-react";
 interface PreviewPlayerProps {
   comp: Composition;
   audioUrl?: string | null;
+  videoUrl?: string | null;
   assets?: RenderAssets;
 }
 
-export function PreviewPlayer({ comp, audioUrl, assets }: PreviewPlayerProps) {
+export function PreviewPlayer({ comp, audioUrl, videoUrl, assets }: PreviewPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const rafRef = useRef(0);
   const clockRef = useRef(0);
   const lastTickRef = useRef(0);
   const lastUiRef = useRef(0);
-  const stateRef = useRef({ comp, assets, playing: false });
+  const stateRef = useRef({ comp, assets, playing: false, videoUrl, audioUrl });
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
 
-  stateRef.current = { comp, assets, playing };
+  stateRef.current = { comp, assets, playing, videoUrl, audioUrl };
 
   const drawAt = (t: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawFrame(ctx, stateRef.current.comp, t, stateRef.current.assets);
+    const video = videoRef.current;
+    const videoAssets =
+      video && video.readyState >= 2 && video.videoWidth > 0
+        ? { video, videoWidth: video.videoWidth, videoHeight: video.videoHeight }
+        : {};
+    drawFrame(ctx, stateRef.current.comp, t, { ...stateRef.current.assets, ...videoAssets });
   };
 
   // Gambar ulang saat komposisi berubah / font siap.
@@ -53,13 +60,17 @@ export function PreviewPlayer({ comp, audioUrl, assets }: PreviewPlayerProps) {
     const loop = () => {
       rafRef.current = requestAnimationFrame(loop);
       const audio = audioRef.current;
+      const video = videoRef.current;
       let t = 0;
       const isPlaying = stateRef.current.playing;
       if (audio && audioUrl) {
         t = audio.currentTime;
-        if (!isPlaying) {
-          // tetap gambar frame saat ini (mis. seek)
-        }
+        if (video && videoUrl && isPlaying && Math.abs(video.currentTime - t) > 0.12)
+          video.currentTime = t;
+      } else if (video && videoUrl) {
+        t = video.currentTime;
+        if (!isPlaying) return;
+        if (video.ended || t >= stateRef.current.comp.duration) setPlaying(false);
       } else if (isPlaying) {
         const now = performance.now() / 1000;
         const dt = Math.min(0.25, now - (lastTickRef.current || now));
@@ -80,20 +91,30 @@ export function PreviewPlayer({ comp, audioUrl, assets }: PreviewPlayerProps) {
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioUrl]);
+  }, [audioUrl, videoUrl]);
 
   const toggle = () => {
     const next = !playing;
     setPlaying(next);
     const audio = audioRef.current;
+    const video = videoRef.current;
     if (audio && audioUrl) {
       if (next) {
         if (audio.ended || audio.currentTime >= comp.duration) audio.currentTime = 0;
         void audio.play();
+        if (video && videoUrl) {
+          if (video.ended || video.currentTime >= comp.duration) video.currentTime = 0;
+          void video.play();
+        }
       } else {
         audio.pause();
+        video?.pause();
       }
+    } else if (video && videoUrl) {
+      if (next) {
+        if (video.ended || video.currentTime >= comp.duration) video.currentTime = 0;
+        void video.play();
+      } else video.pause();
     } else if (next) {
       lastTickRef.current = 0;
       if (clockRef.current >= comp.duration) clockRef.current = 0;
@@ -103,6 +124,8 @@ export function PreviewPlayer({ comp, audioUrl, assets }: PreviewPlayerProps) {
   const seek = (t: number) => {
     const audio = audioRef.current;
     if (audio && audioUrl) audio.currentTime = t;
+    const video = videoRef.current;
+    if (video && videoUrl) video.currentTime = t;
     else clockRef.current = t;
     drawAt(t);
     setTime(t);
@@ -130,6 +153,17 @@ export function PreviewPlayer({ comp, audioUrl, assets }: PreviewPlayerProps) {
         />
       </div>
       <audio ref={audioRef} src={audioUrl ?? undefined} preload="auto" className="hidden" />
+      {videoUrl && (
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          preload="auto"
+          muted={Boolean(audioUrl)}
+          playsInline
+          className="hidden"
+          onLoadedData={() => drawAt(time)}
+        />
+      )}
       <div className="flex items-center gap-2">
         <Button size="icon" variant="outline" onClick={restart} aria-label="Ulang dari awal">
           <RotateCcw className="size-4" />

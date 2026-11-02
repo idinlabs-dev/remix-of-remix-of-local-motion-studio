@@ -56,7 +56,12 @@ export const PLANS: Record<PlanId, Plan> = {
 };
 
 export function formatRupiah(n: number): string {
-  return "Rp" + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (
+    "Rp" +
+    Math.round(n)
+      .toString()
+      .replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+  );
 }
 
 /**
@@ -72,7 +77,7 @@ export function parseAccessCode(raw: string): { plan: PlanId; key: string } | nu
     plan = m[1].toUpperCase() === "PRO" ? "pro" : "starter";
     key = m[2];
   }
-  if (!/^[A-Za-z0-9_\-]{16,128}$/.test(key)) return null;
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) return null;
   return { plan, key };
 }
 
@@ -103,7 +108,10 @@ export function checkAiGate(
     return { ok: false, message: "Mode Edit Video hanya tersedia di paket Pro Creator." };
   }
   if (opts.durationSec > plan.maxSeconds + 0.5) {
-    return { ok: false, message: `Durasi ${Math.round(opts.durationSec)} detik melebihi batas paket ${plan.name} (${plan.maxSeconds} detik).` };
+    return {
+      ok: false,
+      message: `Durasi ${Math.round(opts.durationSec)} detik melebihi batas paket ${plan.name} (${plan.maxSeconds} detik).`,
+    };
   }
   const already = state.used.includes(opts.projectId);
   if (!already && state.used.length >= plan.videos) {
@@ -112,13 +120,25 @@ export function checkAiGate(
   return { ok: true, consumes: !already };
 }
 
-/** Render butuh kode aktif & durasi sesuai paket (tidak memakai jatah). */
-export function checkRenderGate(state: UsageState | null, durationSec: number, mode: ModeId): GateResult {
+/** Render butuh kode aktif, durasi/mode sesuai paket, dan sisa kuota project. */
+export function checkRenderGate(
+  state: UsageState | null,
+  durationSec: number,
+  mode: ModeId,
+  projectId: string,
+): GateResult {
   if (!state) return { ok: false, message: "Masukkan Kode Akses untuk render video." };
   const plan = PLANS[state.plan];
-  if (!plan.modes.includes(mode)) return { ok: false, message: "Mode Edit Video hanya untuk paket Pro Creator." };
+  if (!plan.modes.includes(mode))
+    return { ok: false, message: "Mode Edit Video hanya untuk paket Pro Creator." };
   if (durationSec > plan.maxSeconds + 1) {
-    return { ok: false, message: `Durasi video melebihi batas paket ${plan.name} (${plan.maxSeconds} detik).` };
+    return {
+      ok: false,
+      message: `Durasi video melebihi batas paket ${plan.name} (${plan.maxSeconds} detik).`,
+    };
+  }
+  if (!state.used.includes(projectId) && state.used.length >= plan.videos) {
+    return { ok: false, message: `Jatah ${plan.videos} video paket ${plan.name} sudah habis.` };
   }
   return { ok: true, consumes: false };
 }
