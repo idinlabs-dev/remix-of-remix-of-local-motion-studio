@@ -64,6 +64,8 @@ File media, deteksi jeda, sinkron waktu, dan proses render tetap berada di devic
 
 Klik **Sinkron waktu** untuk membuat batas scene awal berdasarkan estimasi teks dan jeda yang terdeteksi lokal. Untuk mencocokkan pergantian visual dengan ucapan secara tepat, putar preview dan tekan **Tandai mulai** pada scene ketika kalimatnya mulai terdengar. Audio dan teks tidak dikirim keluar untuk proses ini. Subtitle kata-per-kata memakai estimasi lokal di dalam rentang scene.
 
+Pengguna juga dapat mengimpor file `.srt`. Teks setiap subtitle menjadi teks scene, sedangkan timestamp mulai/selesai dari SRT dipakai langsung untuk timeline. Proses impor berlangsung di browser dan tidak memerlukan layanan transkripsi atau API key tambahan.
+
 ## Teknologi
 
 - TanStack Start v1.

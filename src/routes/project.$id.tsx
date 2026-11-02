@@ -31,6 +31,7 @@ import {
   splitSentences,
   type TimedSentence,
 } from "@/lib/engine/timing";
+import { parseSrt } from "@/lib/engine/srt";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
 import {
   decodeAudio,
@@ -115,6 +116,7 @@ function EditorPage() {
   const bgInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // ---- muat project & media ----
@@ -520,6 +522,30 @@ function EditorPage() {
     }
   };
 
+  const importSrt = async (file: File) => {
+    try {
+      if (!file.name.toLowerCase().endsWith(".srt")) {
+        toast.error("Pilih file subtitle berekstensi .srt.");
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error("Ukuran file SRT maksimal 2 MB.");
+        return;
+      }
+      const timings = parseSrt(await file.text());
+      const text = timings.map((cue) => cue.text).join(" ");
+      const next = scenesFromTimings(comp, timings);
+      next.duration = Math.max(comp.duration, next.duration);
+      next.narration = text;
+      next.updatedAt = Date.now();
+      await persist(next);
+      setNarration(text);
+      toast.success(`${timings.length} subtitle SRT diimpor dengan timestamp aslinya.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "File SRT tidak valid.");
+    }
+  };
+
   const ready = comp.scenes.length > 0 && comp.duration > 0;
 
   return (
@@ -551,6 +577,17 @@ function EditorPage() {
         accept="application/json"
         className="hidden"
         onChange={(e) => e.target.files?.[0] && void importTimeline(e.target.files[0])}
+      />
+      <input
+        ref={srtInputRef}
+        type="file"
+        accept=".srt,application/x-subrip,application/srt,text/plain"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void importSrt(file);
+          e.currentTarget.value = "";
+        }}
       />
 
       <header className="border-b-2 border-foreground/15 bg-background/80 backdrop-blur">
@@ -673,6 +710,15 @@ function EditorPage() {
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
+                variant="outline"
+                className="font-semibold"
+                onClick={() => srtInputRef.current?.click()}
+                disabled={busy !== null}
+              >
+                <Upload className="size-4" /> Impor SRT
+              </Button>
+              <Button
+                size="sm"
                 className="font-semibold"
                 onClick={() => void syncTimeline()}
                 disabled={busy !== null}
@@ -691,9 +737,9 @@ function EditorPage() {
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              "Sinkron waktu" menyusun scene secara lokal dari naskah dan jeda audio. Untuk
-              mencocokkan pergantian visual dengan ucapan, putar preview lalu tekan "Tandai mulai"
-              pada scene di awal kalimat yang sesuai.
+              Impor file .srt untuk memakai timestamp subtitle sebagai batas scene dan teks narasi.
+              Tanpa SRT, "Sinkron waktu" memperkirakan batas dari naskah dan jeda audio. Untuk
+              mengoreksi batas, putar preview lalu tekan "Tandai mulai".
             </p>
           </section>
 

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildTimings,
-  computeSilences,
-  splitSentences,
-  wordTimings,
-} from "@/lib/engine/timing";
+import { buildTimings, computeSilences, splitSentences, wordTimings } from "@/lib/engine/timing";
+import { parseSrt } from "@/lib/engine/srt";
 
 describe("splitSentences", () => {
   it("memecah kalimat pada tanda baca", () => {
@@ -104,5 +100,30 @@ describe("wordTimings", () => {
     for (let i = 1; i < words.length; i++) {
       expect(words[i]?.start).toBeCloseTo(words[i - 1]?.end ?? 0, 5);
     }
+  });
+});
+
+describe("parseSrt", () => {
+  it("membaca cue bertimestamp, teks multi-baris, dan markup umum", () => {
+    const cues = parseSrt(
+      "\uFEFF1\r\n00:00:01,250 --> 00:00:02,500\r\n<i>Halo</i> &amp;\r\ndunia\r\n\r\n2\r\n00:00:02.750 --> 00:00:04.000 position:50%\r\nSubtitle kedua",
+    );
+
+    expect(cues).toEqual([
+      { text: "Halo & dunia", start: 1.25, end: 2.5 },
+      { text: "Subtitle kedua", start: 2.75, end: 4 },
+    ]);
+  });
+
+  it("mengurutkan cue berdasarkan timestamp dan mengabaikan blok kosong/tidak valid", () => {
+    const cues = parseSrt(
+      "1\n00:00:03,000 --> 00:00:04,000\nKedua\n\n2\n00:00:01,000 --> 00:00:02,000\nPertama\n\n3\n00:00:05,000 --> 00:00:05,000\nInvalid",
+    );
+
+    expect(cues.map((cue) => cue.text)).toEqual(["Pertama", "Kedua"]);
+  });
+
+  it("menolak file tanpa cue valid", () => {
+    expect(() => parseSrt("bukan file subtitle")).toThrow("Tidak ada subtitle SRT valid");
   });
 });
