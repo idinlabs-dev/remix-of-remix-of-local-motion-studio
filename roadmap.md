@@ -13,5 +13,5 @@
 - [x] Route landing `/` dan editor `/project/$id` + head metadata
 - [x] Uji otomatis: timing kalimat (10 test hijau), sinkron timeline, fallback codec
 - [x] Uji end-to-end render di browser (Playwright): buat project → sinkron waktu → render → unduh
-- [ ] Uji end-to-end AI: transkrip + rencana adegan — **menunggu GEMINI_API_KEY**
+- [ ] Uji end-to-end AI — kunci tersimpan & diterima Google, tapi pembuatan jawaban tidak pernah merespons (kemungkinan kuota/billing akun Gemini)
 - [ ] Bandingkan hasil dengan audio & gambar contoh "sayap pesawat"
