@@ -201,7 +201,8 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
   }
   if (cur.length > 0) lines.push({ words: cur, width: curW });
   // tampilkan maksimal 3 baris di sekitar kata aktif
-  const activeIdx = Math.max(0, words.findIndex((wt) => time >= wt.start && time < wt.end));
+  const foundIdx = words.findIndex((wt) => time >= wt.start && time < wt.end);
+  const activeIdx = Math.max(0, foundIdx);
   let acc = 0;
   let activeLine = 0;
   lines.forEach((l, i) => {
@@ -218,7 +219,7 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
   ctx.beginPath();
   ctx.roundRect(W * 0.05, startY - lineH / 2 - U * 0.015, W * 0.9, blockH + U * 0.03, U * 0.03);
   ctx.fill();
-  const active = words[activeIdx];
+  const active = foundIdx < 0 ? null : words[activeIdx];
   shown.forEach((line, li) => {
     let x = (W - line.width) / 2;
     const y = startY + li * lineH;

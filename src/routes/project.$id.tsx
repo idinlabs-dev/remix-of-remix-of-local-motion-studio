@@ -3,45 +3,47 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  BookmarkPlus,
   Download,
   FileArchive,
   Film,
+  Github,
   ImagePlus,
   Music,
   RefreshCcw,
   Sparkles,
   Trash2,
+  Unplug,
   Upload,
   Video,
-  Wand2,
 } from "lucide-react";
 
 import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { designScenes, transcribeChunks } from "@/lib/ai/ai.functions";
-import type { DesignResponse, TranscribeResponse } from "@/lib/ai/schema";
+import { designScenes, generateRemotionProject } from "@/lib/ai/ai.functions";
+import type { DesignResponse } from "@/lib/ai/schema";
 import { checkAiGate, checkRenderGate } from "@/lib/access/plans";
 import { markProjectUsed, useAccess } from "@/lib/access/store";
 import { applyDesign, scenesFromTimings, genericScene } from "@/lib/engine/planner";
 import {
-  alignChunks,
   buildTimings,
-  chunkRanges,
   computeSilences,
   splitSentences,
   type TimedSentence,
 } from "@/lib/engine/timing";
+import { parseSrt } from "@/lib/engine/srt";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
-import {
-  decodeAudio,
-  decodeVideoAudio,
-  renderComposition,
-  type RenderProgress,
-} from "@/lib/encode/exporter";
+import { decodeAudio, decodeVideoAudio, type RenderProgress } from "@/lib/encode/exporter";
 import { buildRemotionZip } from "@/lib/export/remotion-zip";
-import { toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
+import { unzipSync } from "fflate";
+import {
+  cancelGitHubRender,
+  disconnectGitHub,
+  getGitHubRenderStatus,
+  getGitHubStatus,
+} from "@/lib/github/github.functions";
 import {
   getMedia,
   getProject,
@@ -75,8 +77,6 @@ export const Route = createFileRoute("/project/$id")({
   }),
   component: EditorPage,
 });
-
-const MAX_TRANSCRIBE_BYTES = 18 * 1024 * 1024;
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -114,12 +114,44 @@ function EditorPage() {
   const [progress, setProgress] = useState<RenderProgress | null>(null);
   const [renders, setRenders] = useState<RenderRecord[]>([]);
   const [renderUrls, setRenderUrls] = useState<Record<string, string>>({});
+  const [githubStatus, setGithubStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    login?: string;
+    avatarUrl?: string;
+  }>({ configured: false, connected: false });
+  const [remoteMessage, setRemoteMessage] = useState<string | null>(null);
+  const [playhead, setPlayhead] = useState(0);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const remoteRunRef = useRef<{ runId: number; tag: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const result = new URL(window.location.href).searchParams.get("github");
+    if (result) {
+      const current = new URL(window.location.href);
+      current.searchParams.delete("github");
+      window.history.replaceState({}, "", `${current.pathname}${current.search}${current.hash}`);
+      if (result === "connected")
+        toast.success("GitHub tersambung. Render otomatis siap digunakan.");
+      else toast.error("Koneksi GitHub belum berhasil. Coba lagi.");
+    }
+    void getGitHubStatus()
+      .then((status) => {
+        if (active) setGithubStatus(status);
+      })
+      .catch(() => {
+        if (active) setGithubStatus({ configured: false, connected: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // ---- muat project & media ----
   useEffect(() => {
@@ -188,7 +220,7 @@ function EditorPage() {
 
   if (missing) {
     return (
-      <div className="grid-paper flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-screen items-center justify-center bg-white px-4">
         <div className="max-w-sm rounded-xl border-2 border-foreground/20 bg-card p-8 text-center">
           <p className="font-bold">Project tidak ditemukan</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -206,7 +238,7 @@ function EditorPage() {
 
   if (!comp) {
     return (
-      <div className="grid-paper flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <p className="text-sm text-muted-foreground">Memuat project…</p>
       </div>
     );
@@ -324,67 +356,34 @@ function EditorPage() {
       toast.error("Tulis dulu teks narasinya.");
       return;
     }
-    await persist(
-      scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
-    );
+    const next = scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined);
+    next.narration = narration;
+    await persist(next);
     toast.success(`${timings.length} adegan tersusun.`);
   };
 
-  const transcribeNow = async () => {
-    if (!audioRec && !videoRec) {
-      toast.error("Upload audio atau footage dengan track audio untuk transkrip otomatis.");
+  const markSceneStart = async (index: number) => {
+    if (index <= 0) {
+      toast.info("Adegan pertama selalu mulai dari 0 detik.");
       return;
     }
-    const gate = checkAiGate(access, {
-      projectId: comp.id,
-      durationSec: decoded?.duration ?? comp.duration,
-      mode: comp.mode,
+    const prev = comp.scenes[index - 1];
+    const current = comp.scenes[index];
+    if (!prev || !current) return;
+    const min = prev.start + 0.3;
+    const max = current.end - 0.3;
+    if (max < min) {
+      toast.error("Jarak antar adegan terlalu pendek untuk dipindahkan.");
+      return;
+    }
+    const boundary = Math.max(min, Math.min(max, playhead));
+    const scenes = comp.scenes.map((scene, i) => {
+      if (i === index - 1) return { ...scene, end: boundary };
+      if (i === index) return { ...scene, start: boundary };
+      return scene;
     });
-    if (!gate.ok) {
-      toast.error(gate.message);
-      return;
-    }
-    if (!access) return;
-    if (audioRec && audioRec.blob.size > MAX_TRANSCRIBE_BYTES) {
-      toast.error(
-        "Audio terlalu besar untuk transkrip (maks 18 MB). Potong dulu atau tempel teks manual.",
-      );
-      return;
-    }
-    setBusy("transcribe");
-    try {
-      const audio =
-        decoded ??
-        (audioRec ? await decodeAudio(audioRec.blob) : await decodeVideoAudio(videoRec!.blob));
-      if (!audio) {
-        toast.error("Footage tidak memiliki track audio yang bisa dibaca.");
-        return;
-      }
-      if (!decoded) setDecoded(audio);
-      const silences = computeSilences(audio.getChannelData(0), audio.sampleRate);
-      const ranges = chunkRanges(silences, audio.duration);
-      const mono16k = await toMono16k(audio);
-      const chunks = wavChunksBase64(mono16k, ranges);
-      const res: TranscribeResponse = await transcribeChunks({
-        data: { code: access.code, chunks },
-      });
-      if (!res.ok) {
-        toast.error("Transkrip gagal: " + res.message);
-        return;
-      }
-      const timedChunks = ranges.map((range, i) => ({ ...range, text: res.texts[i] ?? "" }));
-      const timings = alignChunks(timedChunks, silences, audio.duration);
-      setNarration(timings.map((t) => t.text).join(" "));
-      await persist(
-        scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
-      );
-      markProjectUsed(comp.id);
-      toast.success(`Transkrip: ${timings.length} kalimat.`);
-    } catch {
-      toast.error("Transkrip gagal — coba lagi.");
-    } finally {
-      setBusy(null);
-    }
+    await persist({ ...comp, scenes, updatedAt: Date.now() });
+    toast.success(`Batas adegan #${index + 1} dipindah ke ${boundary.toFixed(2)} dtk.`);
   };
 
   const planWithAi = async () => {
@@ -441,7 +440,9 @@ function EditorPage() {
 
   const updateSceneText = async (index: number, text: string) => {
     const scenes = comp.scenes.map((s, i) => (i === index ? { ...s, text } : s));
-    await persist({ ...comp, scenes, updatedAt: Date.now() });
+    const nextNarration = scenes.map((scene) => scene.text).join(" ");
+    setNarration(nextNarration);
+    await persist({ ...comp, scenes, narration: nextNarration, updatedAt: Date.now() });
   };
 
   const changeAspect = async (aspect: Aspect) => {
@@ -451,6 +452,12 @@ function EditorPage() {
 
   // ---- render & ekspor ----
   const renderNow = async () => {
+    if (!githubStatus.connected) {
+      toast.error("Silakan login terlebih dahulu untuk membuat video.");
+      const target = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
+      return;
+    }
     if (comp.scenes.length === 0 || comp.duration <= 0) {
       toast.error("Susun timeline dulu sebelum render.");
       return;
@@ -460,35 +467,116 @@ function EditorPage() {
       toast.error(gate.message);
       return;
     }
+    if (!access) {
+      toast.error("Masukkan Kode Akses untuk render video.");
+      return;
+    }
     setBusy("render");
     setProgress({ phase: "preparing", frame: 0, totalFrames: 0 });
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const audio =
-        decoded ??
-        (audioRec
-          ? await decodeAudio(audioRec.blob)
-          : videoRec
-            ? await decodeVideoAudio(videoRec.blob)
-            : null);
-      if (audio && !decoded) setDecoded(audio);
-      const result = await renderComposition({
-        comp,
-        assets: bgBitmap
-          ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
-          : {},
-        audio,
-        video: videoRec?.blob ?? null,
-        onProgress: setProgress,
-        signal: abortRef.current.signal,
-      });
+      let resultBlob: Blob;
+      let resultMime: string;
+      let resultName: string;
+      let resultMessage: string;
+      {
+        setRemoteMessage("Menyiapkan video…");
+        const generated = await generateRemotionProject({
+          data: {
+            code: access.code,
+            title: comp.title,
+            mode: comp.mode,
+            aspect: comp.aspect,
+            scenes: comp.scenes.map((scene) => ({
+              id: scene.id,
+              text: scene.text,
+              start: scene.start,
+              end: scene.end,
+            })),
+          },
+        });
+        if (!generated.ok) throw new Error(generated.message);
+        setRemoteMessage("Menyusun source Remotion khusus konten…");
+        const packageBlob = await buildRemotionZip(
+          comp,
+          {
+            audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
+            bg: bgRec ? { name: bgRec.name, blob: bgRec.blob } : null,
+            video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
+          },
+          { generatedManifest: generated.manifest },
+        );
+        if (packageBlob.size > 70 * 1024 * 1024) {
+          throw new Error(
+            "Ukuran media terlalu besar untuk render otomatis. Kurangi ukuran media lalu coba lagi.",
+          );
+        }
+        setRemoteMessage("Mengirim video…");
+        const startResponse = await fetch("/api/github/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/zip" },
+          body: packageBlob,
+          signal: controller.signal,
+        });
+        const startData = (await startResponse.json().catch(() => null)) as {
+          runId?: number;
+          tag?: string;
+          error?: string;
+        } | null;
+        if (!startResponse.ok || !startData?.runId || !startData.tag) {
+          throw new Error(startData?.error ?? "Render otomatis belum bisa dimulai.");
+        }
+        const remoteRun = { runId: startData.runId, tag: startData.tag };
+        remoteRunRef.current = remoteRun;
+        setRemoteMessage("Menunggu giliran render…");
+        const deadline = Date.now() + 90 * 60 * 1000;
+        let completed = false;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          if (controller.signal.aborted) throw new DOMException("Render dibatalkan", "AbortError");
+          const status = await getGitHubRenderStatus({ data: remoteRun });
+          if (status.status === "queued") {
+            setRemoteMessage("Menunggu giliran render…");
+          } else if (status.status === "in_progress") {
+            setRemoteMessage("Sedang membuat video…");
+          } else if (status.status === "completed") {
+            if (status.conclusion !== "success")
+              throw new Error("Render otomatis gagal. Coba render lagi.");
+            completed = true;
+            break;
+          }
+        }
+        if (!completed)
+          throw new Error("Render memerlukan waktu lebih lama dari batas yang diizinkan.");
+        setRemoteMessage("Mengambil hasil video…");
+        const artifactResponse = await fetch(
+          `/api/github/artifact?runId=${remoteRun.runId}&tag=${encodeURIComponent(remoteRun.tag)}`,
+          { signal: controller.signal },
+        );
+        if (!artifactResponse.ok) {
+          const detail = (await artifactResponse.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(detail?.error ?? "Video selesai tetapi belum bisa diunduh.");
+        }
+        const archive = unzipSync(new Uint8Array(await artifactResponse.arrayBuffer()));
+        const videoPath = Object.keys(archive).find((path) => path.endsWith("video.mp4"));
+        const videoBytes = videoPath ? archive[videoPath] : undefined;
+        if (!videoBytes?.byteLength)
+          throw new Error("File video tidak ditemukan dalam hasil render.");
+        resultBlob = new Blob([Uint8Array.from(videoBytes).buffer], { type: "video/mp4" });
+        resultMime = "video/mp4";
+        resultName = `${comp.title}.mp4`;
+        resultMessage = "Render selesai — video siap diputar dan diunduh.";
+      }
       await putRender({
         id: crypto.randomUUID(),
         projectId: comp.id,
-        name: `${comp.title}.${result.profile.ext}`,
-        mime: result.profile.mime,
-        blob: result.blob,
-        durationSec: result.durationSec,
+        name: resultName,
+        mime: resultMime,
+        blob: resultBlob,
+        durationSec: comp.duration,
       });
       markProjectUsed(comp.id);
       const rs = await listRenders(comp.id);
@@ -496,17 +584,19 @@ function EditorPage() {
       const urls: Record<string, string> = {};
       for (const r of rs) urls[r.id] = URL.createObjectURL(r.blob);
       setRenderUrls(urls);
-      toast.success(`Render selesai — ${result.profile.container.toUpperCase()}.`);
+      toast.success(resultMessage);
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError")
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError"))
         toast.info("Render dibatalkan.");
       else
         toast.error(
-          "Render gagal: browser ini mungkin tidak mendukung encode video. Coba Chrome/Edge terbaru.",
+          err instanceof Error ? `Render gagal: ${err.message}` : "Render gagal. Coba lagi.",
         );
     } finally {
       setBusy(null);
       setProgress(null);
+      setRemoteMessage(null);
+      remoteRunRef.current = null;
       abortRef.current = null;
     }
   };
@@ -539,22 +629,34 @@ function EditorPage() {
     }
   };
 
-  const importTimeline = async (file: File) => {
+  const importSrt = async (file: File) => {
     try {
-      const parsed = JSON.parse(await file.text()) as Composition;
-      if (!parsed.scenes || typeof parsed.duration !== "number") throw new Error("bad");
-      await persist({ ...parsed, id: comp.id, updatedAt: Date.now() });
-      setNarration(parsed.narration ?? "");
-      toast.success("Timeline diimpor.");
-    } catch {
-      toast.error("File timeline tidak valid.");
+      if (!file.name.toLowerCase().endsWith(".srt")) {
+        toast.error("Pilih file subtitle berekstensi .srt.");
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error("Ukuran file SRT maksimal 2 MB.");
+        return;
+      }
+      const timings = parseSrt(await file.text());
+      const text = timings.map((cue) => cue.text).join(" ");
+      const next = scenesFromTimings(comp, timings);
+      next.duration = Math.max(comp.duration, next.duration);
+      next.narration = text;
+      next.updatedAt = Date.now();
+      await persist(next);
+      setNarration(text);
+      toast.success(`${timings.length} subtitle SRT diimpor dengan timestamp aslinya.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "File SRT tidak valid.");
     }
   };
 
   const ready = comp.scenes.length > 0 && comp.duration > 0;
 
   return (
-    <div className="grid-paper min-h-screen pb-16">
+    <div className="min-h-screen bg-white pb-16">
       <input
         ref={audioInputRef}
         type="file"
@@ -577,11 +679,15 @@ function EditorPage() {
         onChange={(e) => e.target.files?.[0] && void onVideoFile(e.target.files[0])}
       />
       <input
-        ref={importInputRef}
+        ref={srtInputRef}
         type="file"
-        accept="application/json"
+        accept=".srt,text/srt,application/x-subrip,application/srt,text/plain"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && void importTimeline(e.target.files[0])}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void importSrt(file);
+          e.currentTarget.value = "";
+        }}
       />
 
       <header className="border-b-2 border-foreground/15 bg-background/80 backdrop-blur">
@@ -630,7 +736,12 @@ function EditorPage() {
             >
               <Upload className="size-4" /> {audioRec ? audioRec.name : "Upload MP3/WAV"}
             </Button>
-            {audioUrl && <audio src={audioUrl} controls className="mt-3 w-full" />}
+            {audioUrl && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Audio siap. Gunakan kontrol preview sinkron di panel kanan untuk memutar dan
+                menandai waktu.
+              </p>
+            )}
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
@@ -693,19 +804,18 @@ function EditorPage() {
               value={narration}
               onChange={(e) => setNarration(e.target.value)}
               rows={6}
-              placeholder="Tempel teks narasi di sini, atau pakai transkrip otomatis…"
+              placeholder="Tempel naskah yang sama dengan audio narasi di sini…"
               className="resize-y"
             />
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
-                variant="outline"
                 size="sm"
+                variant="outline"
                 className="font-semibold"
-                onClick={() => void transcribeNow()}
-                disabled={busy !== null || (!audioRec && !videoRec)}
+                onClick={() => srtInputRef.current?.click()}
+                disabled={busy !== null}
               >
-                <Wand2 className="size-4" />{" "}
-                {busy === "transcribe" ? "Mentranskrip…" : "Auto-transkrip (AI)"}
+                <Upload className="size-4" /> Impor SRT
               </Button>
               <Button
                 size="sm"
@@ -727,8 +837,13 @@ function EditorPage() {
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              "Sinkron waktu" memecah kalimat & menyelaraskan dari jeda audio (lokal). "Rancang
-              adegan" memakai AI.
+              Impor file .srt untuk memakai timestamp subtitle sebagai batas scene dan teks narasi.
+              Tanpa SRT, "Sinkron waktu" memperkirakan batas dari naskah dan jeda audio. Untuk
+              mengoreksi batas, putar preview lalu tekan "Tandai mulai".
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Privasi: audio tetap diproses lokal. Saat tombol AI ditekan, teks narasi dan durasi
+              adegan dikirim ke Kie.ai untuk merancang visual.
             </p>
           </section>
 
@@ -753,43 +868,91 @@ function EditorPage() {
             >
               <Film className="size-4" /> {busy === "render" ? "Merender…" : "Render video"}
             </Button>
+            <div className="mt-3 rounded-lg border border-border bg-slate-50 p-3">
+              {githubStatus.connected ? (
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 items-center gap-2 font-semibold">
+                    <Github className="size-4 shrink-0" />
+                    <span className="truncate">
+                      Render otomatis aktif{githubStatus.login ? ` · @${githubStatus.login}` : ""}
+                    </span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setBusy("github-disconnect");
+                      void disconnectGitHub()
+                        .then(() => {
+                          setGithubStatus({ configured: true, connected: false });
+                          toast.success("Akun GitHub diputuskan.");
+                        })
+                        .catch(() => toast.error("Koneksi GitHub belum bisa diputuskan."))
+                        .finally(() => setBusy(null));
+                    }}
+                  >
+                    <Unplug className="size-3.5" /> Putuskan
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Silakan login terlebih dahulu untuk membuat video final.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full font-semibold"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      const target = `${window.location.pathname}${window.location.search}`;
+                      window.location.assign(
+                        `/api/github/connect?returnTo=${encodeURIComponent(target)}`,
+                      );
+                    }}
+                  >
+                    <Github className="size-4" /> Login dengan GitHub
+                  </Button>
+                </div>
+              )}
+            </div>
             {busy === "render" && progress && (
               <div className="mt-3">
                 <Progress
                   value={progress.totalFrames ? (progress.frame / progress.totalFrames) * 100 : 0}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {progress.phase}{" "}
-                  {progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}
+                  {remoteMessage ??
+                    `${progress.phase} ${progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}`}
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="mt-1"
-                  onClick={() => abortRef.current?.abort()}
+                  onClick={() => {
+                    abortRef.current?.abort();
+                    const remoteRun = remoteRunRef.current;
+                    if (remoteRun) {
+                      void cancelGitHubRender({ data: remoteRun }).catch(() => {
+                        toast.error("Pembatalan render belum bisa dikirim ke GitHub.");
+                      });
+                    }
+                  }}
                 >
                   Batalkan
                 </Button>
               </div>
             )}
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 font-semibold"
-                onClick={exportTimeline}
-              >
-                <Download className="size-4" /> Ekspor timeline
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 font-semibold"
-                onClick={() => importInputRef.current?.click()}
-              >
-                <Upload className="size-4" /> Impor timeline
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 w-full font-semibold"
+              onClick={exportTimeline}
+            >
+              <Download className="size-4" /> Ekspor timeline
+            </Button>
             {access?.plan === "pro" && (
               <Button
                 variant="outline"
@@ -837,6 +1000,7 @@ function EditorPage() {
               comp={comp}
               audioUrl={audioUrl}
               videoUrl={videoUrl}
+              onTimeChange={setPlayhead}
               assets={
                 bgBitmap ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height } : {}
               }
@@ -864,10 +1028,22 @@ function EditorPage() {
                         {scene.layout}
                         {scene.items?.length ? ` · ${scene.items.length} item` : ""}
                       </span>
+                      {i > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto shrink-0"
+                          disabled={busy !== null || (!audioUrl && !videoUrl)}
+                          onClick={() => void markSceneStart(i)}
+                          title={`Gunakan posisi preview ${playhead.toFixed(2)} detik sebagai awal scene`}
+                        >
+                          <BookmarkPlus className="size-3.5" /> Tandai mulai
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="ml-auto"
+                        className={i > 0 ? "shrink-0" : "ml-auto"}
                         onClick={() => void regenerateScene(i)}
                       >
                         <RefreshCcw className="size-3.5" /> Generik

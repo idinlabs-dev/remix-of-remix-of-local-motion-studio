@@ -91,31 +91,34 @@ export function buildTimings(
 
   const boundariesNeeded = sentences.length - 1;
   const boundaries: number[] = [];
-  if (midpoints.length >= boundariesNeeded && boundariesNeeded > 0) {
-    // Pilih boundary yang paling merata di antara midpoint yang tersedia.
-    for (let i = 1; i <= boundariesNeeded; i++) {
-      const ideal = (i / (boundariesNeeded + 1)) * duration;
-      const first = midpoints[0] ?? ideal;
-      let best = first;
-      let bestDist = Math.abs(first - ideal);
-      for (const m of midpoints) {
-        const d = Math.abs(m - ideal);
-        if (d < bestDist) {
-          best = m;
-          bestDist = d;
-        }
-      }
-      boundaries.push(best);
-    }
-    boundaries.sort((a, b) => a - b);
-  } else {
-    // Fallback: bagi berbobot panjang karakter.
-    const weights = sentences.map((s) => Math.max(s.length, 4));
+  if (boundariesNeeded > 0) {
+    // Estimate each target from spoken word counts, then snap to a nearby
+    // distinct pause. Use available pauses even when there are fewer pauses
+    // than scene boundaries; never reuse a pause.
+    const weights = sentences.map((s) => Math.max(1, s.trim().split(/\s+/).length));
     const totalWeight = weights.reduce((a, b) => a + b, 0);
-    let acc = 0;
+    const snapRadius = Math.max(0.35, Math.min(1.2, (duration / (boundariesNeeded + 1)) * 0.45));
+    let cumulative = 0;
+    let candidateIndex = 0;
     for (let i = 0; i < boundariesNeeded; i++) {
-      acc += weights[i] ?? 0;
-      boundaries.push((acc / totalWeight) * duration);
+      cumulative += weights[i] ?? 1;
+      const target = (cumulative / totalWeight) * duration;
+      while (
+        candidateIndex < midpoints.length &&
+        (midpoints[candidateIndex] ?? 0) < target - snapRadius
+      )
+        candidateIndex++;
+      let snapped: number | undefined;
+      if (
+        candidateIndex < midpoints.length &&
+        Math.abs((midpoints[candidateIndex] ?? 0) - target) <= snapRadius
+      ) {
+        snapped = midpoints[candidateIndex];
+        candidateIndex++;
+      }
+      const lower = (boundaries.at(-1) ?? 0) + 0.3;
+      const upper = duration - (boundariesNeeded - i) * 0.3;
+      boundaries.push(Math.max(lower, Math.min(upper, snapped ?? target)));
     }
   }
 
@@ -137,23 +140,8 @@ export function buildTimings(
   return timings;
 }
 
-/** Susun timeline dari transkrip ber-waktu (hasil AI). */
-export function buildFromTranscript(
-  items: { text: string; start: number; end: number }[],
-  duration: number,
-): TimedSentence[] {
-  if (items.length === 0) return [];
-  const sorted = [...items].sort((a, b) => a.start - b.start);
-  const out: TimedSentence[] = sorted.map((it, i) => ({
-    text: it.text,
-    start: it.start,
-    end: i === sorted.length - 1 ? Math.max(it.end, duration) : it.end,
-  }));
-  return out;
-}
-
 /**
- * Waktu mulai tiap kata di dalam kalimat — proporsional panjang karakter.
+ * Estimasi waktu tiap kata di dalam kalimat — proporsional panjang karakter.
  * Dipakai subtitle sorot kata-per-kata; deterministik.
  */
 export function wordTimings(
@@ -172,65 +160,4 @@ export function wordTimings(
     cursor += span;
     return t;
   });
-}
-
-/**
- * Potong audio panjang jadi beberapa bagian (untuk transkrip per bagian) —
- * batas dipilih di tengah jeda terdekat dari target panjang.
- */
-export function chunkRanges(
-  silences: Silence[],
-  duration: number,
-  target = 12,
-  maxLen = 20,
-): { start: number; end: number }[] {
-  if (duration <= 0) return [];
-  const mids = silences
-    .map((s) => (s.start + s.end) / 2)
-    .filter((m) => m > 0.5 && m < duration - 0.5)
-    .sort((a, b) => a - b);
-  const out: { start: number; end: number }[] = [];
-  let start = 0;
-  while (duration - start > maxLen) {
-    const ideal = start + target;
-    const cands = mids.filter((m) => m > start + target * 0.5 && m <= start + maxLen);
-    let cut = ideal;
-    for (const m of cands) if (Math.abs(m - ideal) < Math.abs(cut - ideal) || cut === ideal) cut = m;
-    out.push({ start, end: cut });
-    start = cut;
-  }
-  out.push({ start, end: duration });
-  return out;
-}
-
-/**
- * Gabungkan transkrip per bagian jadi kalimat ber-waktu: tiap bagian punya
- * waktu pasti, di dalamnya kalimat diselaraskan ke jeda audio.
- */
-export function alignChunks(
-  chunks: { start: number; end: number; text: string }[],
-  silences: Silence[],
-  duration: number,
-): TimedSentence[] {
-  const out: TimedSentence[] = [];
-  for (const c of chunks) {
-    const sentences = splitSentences(c.text);
-    if (sentences.length === 0) {
-      const prev = out[out.length - 1];
-      if (prev) prev.end = c.end;
-      continue;
-    }
-    const len = c.end - c.start;
-    const local = silences
-      .filter((s) => s.start >= c.start && s.end <= c.end)
-      .map((s) => ({ start: s.start - c.start, end: s.end - c.start }));
-    for (const t of buildTimings(sentences, local, len)) {
-      out.push({ text: t.text, start: t.start + c.start, end: t.end + c.start });
-    }
-  }
-  const first = out[0];
-  if (first) first.start = 0;
-  const last = out[out.length - 1];
-  if (last) last.end = Math.max(last.end, duration);
-  return out;
 }

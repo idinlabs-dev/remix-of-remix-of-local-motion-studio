@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { checkKieKey } from "@/lib/ai/kie.server";
 
-function mockCredits(credits: number) {
+function mockCreditResponse(status: number, body: unknown) {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: 200, msg: "success", data: credits }), {
-        status: 200,
+      new Response(JSON.stringify(body), {
+        status,
         headers: { "content-type": "application/json" },
       }),
     ),
@@ -16,21 +16,19 @@ function mockCredits(credits: number) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Kie.ai API key validation", () => {
-  it("allows activating a valid key even when its Kie.ai credit balance is zero", async () => {
-    mockCredits(0);
-    await expect(checkKieKey("test-api-key", { requireCredits: false })).resolves.toEqual({
-      credits: 0,
-    });
+describe("Kie.ai activation validation", () => {
+  it("rejects a key with zero credits before activation", async () => {
+    mockCreditResponse(200, { code: 200, msg: "success", data: 0 });
+    await expect(checkKieKey("synthetic-api-key")).rejects.toThrow(/Saldo API key Kie.ai habis/);
   });
 
-  it("still blocks AI calls when the Kie.ai balance is zero", async () => {
-    mockCredits(0);
-    await expect(checkKieKey("test-api-key")).rejects.toThrow(/Saldo kredit akun Kie.ai/);
+  it("accepts a valid key with positive credits", async () => {
+    mockCreditResponse(200, { code: 200, msg: "success", data: 12.5 });
+    await expect(checkKieKey("synthetic-api-key")).resolves.toEqual({ credits: 12.5 });
   });
 
-  it("accepts an active key with positive credits for AI calls", async () => {
-    mockCredits(12.5);
-    await expect(checkKieKey("test-api-key")).resolves.toEqual({ credits: 12.5 });
+  it("rejects an invalid API key", async () => {
+    mockCreditResponse(401, { code: 401, msg: "unauthorized" });
+    await expect(checkKieKey("synthetic-api-key")).rejects.toThrow(/Kode akses tidak valid/);
   });
 });

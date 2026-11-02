@@ -13,13 +13,13 @@ Mode ini ditujukan untuk video narasi tanpa pembicara di layar.
 Input:
 
 - Audio narasi.
-- Teks naskah, baik ditempel manual maupun hasil transkrip otomatis.
+- Teks naskah yang ditempel manual, sama dengan audio narasi.
 - Gambar background opsional.
 
 Output dan proses:
 
 - Kalimat dipecah menjadi beberapa scene.
-- Timing diselaraskan dengan durasi audio dan jeda bicara.
+- Sinkron waktu berjalan lokal: panjang teks dan jeda audio dipakai untuk memperkirakan batas scene. Penanda manual di preview digunakan untuk mengoreksi awal scene.
 - AI memilih layout yang relevan untuk setiap kalimat.
 - Subtitle dianimasikan kata demi kata.
 - Warna, font, background, partikel, ikon, dan stiker mengikuti topik narasi.
@@ -41,7 +41,7 @@ Fitur yang dirancang:
 
 ## Arsitektur
 
-Auto Remotion Studio menggunakan prinsip **device-side first**. Server tidak digunakan untuk merender video berukuran besar.
+Auto Remotion Studio menggunakan prinsip **local-first**. Secara default, video dirender di perangkat pengguna. Pengguna dapat memilih menghubungkan GitHub agar render Remotion dijalankan oleh GitHub Actions di akun mereka.
 
 ```text
 Browser pengguna
@@ -53,13 +53,20 @@ Browser pengguna
 │   └── Menggambar frame berdasarkan waktu
 ├── WebCodecs + Mediabunny
 │   └── Encode video dan mux audio
+├── GitHub Actions (opsional)
+│   └── Render Remotion di repo privat milik pengguna
 └── Server Functions
     ├── Verifikasi kode akses
-    ├── AI Creative Director via Kie.ai
-    └── Transkripsi audio via AI Gateway
+    └── AI Creative Director via Kie.ai (opsional, untuk desain visual)
 ```
 
-Dengan pendekatan ini, file media dan proses render tetap berada di device pengguna. Server hanya menangani panggilan AI yang diperlukan.
+File media, deteksi jeda, dan sinkron waktu tetap berada di device pengguna. Render lokal tidak mengunggah project. Jika pengguna menghubungkan GitHub, paket Remotion dan media dikirim ke repo privat akun mereka untuk dirender; file input sementara dihapus setelah workflow selesai dan artifact video kedaluwarsa setelah satu hari. Sinkron waktu tidak membuat transkrip dan tidak mengirim audio ke server atau layanan lain. Teks narasi disediakan pengguna; Kie.ai hanya dipanggil jika pengguna memilih desain visual AI.
+
+### Sinkronisasi naskah dan audio
+
+Klik **Sinkron waktu** untuk membuat batas scene awal berdasarkan estimasi teks dan jeda yang terdeteksi lokal. Untuk mencocokkan pergantian visual dengan ucapan secara tepat, putar preview dan tekan **Tandai mulai** pada scene ketika kalimatnya mulai terdengar. Audio dan teks tidak dikirim keluar untuk proses ini. Subtitle kata-per-kata memakai estimasi lokal di dalam rentang scene.
+
+Pengguna juga dapat mengimpor file `.srt`. Teks setiap subtitle menjadi teks scene, sedangkan timestamp mulai/selesai dari SRT dipakai langsung untuk timeline. Proses impor berlangsung di browser dan tidak memerlukan layanan transkripsi atau API key tambahan.
 
 ## Teknologi
 
@@ -74,8 +81,8 @@ Dengan pendekatan ini, file media dan proses render tetap berada di device pengg
 - Mediabunny untuk mux MP4/WebM.
 - IndexedDB untuk project dan media lokal.
 - `localStorage` untuk kode akses, kuota, dan preferensi ringan.
+- GitHub App OAuth dan GitHub Actions untuk render Remotion opsional.
 - Claude Haiku 5.5 melalui endpoint Kie.ai untuk desain scene.
-- AI Gateway untuk transkripsi audio.
 - Vitest untuk pengujian otomatis.
 
 ## Mesin Visual
@@ -97,12 +104,12 @@ Tema, warna, font, background prosedural, partikel, ikon, dan stiker tidak di-ha
 
 ## Paket Akses
 
-Auto Remotion Studio tidak menggunakan sistem login atau database pengguna. Akses diberikan melalui kode lisensi yang diverifikasi server.
+Auto Remotion Studio tidak menggunakan sistem login atau database pengguna. Saat aktivasi, server memvalidasi API key Kie.ai dan memastikan saldo kredit masih tersedia; prefiks kode menentukan paket.
 
-| Paket | Harga promo | Kuota | Durasi maksimal | Fitur utama |
-| --- | ---: | ---: | ---: | --- |
-| Starter | Rp20.000 | 30 video | 90 detik | Motion Explainer dan render MP4 lokal |
-| Pro Creator | Rp49.000 | 100 video | 120 detik | Semua fitur Starter, Mode Edit Video, dan export Remotion ZIP |
+| Paket       | Harga promo |     Kuota | Durasi maksimal | Fitur utama                                                   |
+| ----------- | ----------: | --------: | --------------: | ------------------------------------------------------------- |
+| Starter     |    Rp20.000 |  30 video |        90 detik | Motion Explainer dan render MP4 lokal                         |
+| Pro Creator |    Rp49.000 | 100 video |       120 detik | Semua fitur Starter, Mode Edit Video, dan export Remotion ZIP |
 
 Harga coret promo:
 
@@ -111,7 +118,7 @@ Harga coret promo:
 
 Kode yang diawali `PRO-` dibaca sebagai paket Pro. Kode Starter menggunakan prefix `STARTER-` atau `STR-`. Status penggunaan disimpan di browser/device pengguna.
 
-> Penghapusan data browser dapat menghapus catatan kuota lokal. Validasi dan pembatasan saldo layanan AI tetap berada di backend Kie.ai.
+> Penghapusan data browser dapat menghapus catatan kuota lokal. Validasi key/kredit berjalan server-side melalui endpoint saldo Kie.ai; request fitur desain tetap dapat ditolak oleh provider jika saldo atau akses berubah setelah aktivasi.
 
 ## Pembayaran
 
@@ -134,7 +141,8 @@ src/
 │   └── PreviewPlayer.tsx       # Preview canvas dengan audio sinkron
 ├── routes/
 │   ├── index.tsx               # Landing page, mode, pricing, kode akses
-│   └── project.$id.tsx         # Editor project dan alur render
+│   ├── project.$id.tsx         # Editor project dan alur render
+│   └── api/github/             # OAuth, render dispatch, dan artifact proxy
 ├── lib/
 │   ├── access/
 │   │   ├── plans.ts            # Paket, kuota, dan access gate
@@ -144,20 +152,24 @@ src/
 │   │   ├── ai.functions.ts     # Server functions AI
 │   │   ├── kie.server.ts       # Client server Kie.ai
 │   │   ├── schema.ts           # Schema Zod dan prompt Creative Director
-│   │   └── transcribe.server.ts# Transkripsi audio
+│   │   └── generated-project-schema.ts # Kontrak manifest visual source per konten
 │   ├── encode/
 │   │   ├── exporter.ts          # Render Canvas dan encode WebCodecs
-│   │   └── wav.ts               # Resample dan potong audio transkripsi
 │   ├── engine/
 │   │   ├── background.ts        # Background prosedural dan partikel
 │   │   ├── layouts.ts           # Renderer layout infografis
 │   │   ├── planner.ts           # Scene generik dan penerapan desain AI
 │   │   ├── renderer.ts          # Renderer frame utama
 │   │   ├── themes.ts            # Preset tema dan font
-│   │   ├── timing.ts             # Timing kalimat dan jeda audio
+│   │   ├── timing.ts             # Timing kalimat, estimasi lokal, dan jeda audio
 │   │   └── types.ts              # Model Composition dan Scene
 │   ├── export/
-│   │   └── remotion-zip.ts      # Generator source project Remotion
+│   │   ├── remotion-zip.ts      # Generator source project Remotion + media/SRT
+│   │   └── generated-project.ts # Composer dan validator source AI per konten
+│   ├── github/
+│   │   ├── github.server.ts     # OAuth, token session, provisioning repo, dan render API
+│   │   ├── runner-template.ts   # Workflow GitHub Actions statis
+│   │   └── session.ts           # Cookie sesi terenkripsi dan OAuth state
 │   └── storage/
 │       └── db.ts                # IndexedDB dan preferensi localStorage
 └── test/                        # Test timing dan routing
@@ -173,7 +185,7 @@ Persyaratan:
 Clone repository dan install dependency:
 
 ```bash
-git clone https://github.com/wulanvlogaja-byte/remix-of-remix-of-local-motion-studio.git
+git clone https://github.com/idinlabs-dev/remix-of-remix-of-local-motion-studio.git
 cd remix-of-remix-of-local-motion-studio
 pnpm install
 ```
@@ -212,16 +224,20 @@ Contoh konfigurasi:
 # Origin publik deployment; dipakai untuk canonical dan Open Graph URL.
 VITE_SITE_URL=https://domain-anda.example
 
-# Model AI untuk deployment yang memakai provider Gemini lama/kompatibel.
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.8-flash
-
-# Kunci berikut digunakan oleh alur server yang aktif dan disediakan
-# melalui secret manager deployment, bukan dikirim ke browser.
-LOVABLE_API_KEY=
+# Opsional: GitHub App untuk render GitHub Actions
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+GITHUB_APP_CALLBACK_URL=https://domain-anda.example/api/github/callback
+GITHUB_SESSION_SECRET= # openssl rand -hex 32
 ```
 
-Kunci API tidak boleh diletakkan di komponen React atau dikirim sebagai environment variable client-side. Server function bertanggung jawab meneruskan request ke provider AI.
+Sinkron waktu dan render lokal tidak memerlukan API key tambahan. Jika pengguna memilih **Rancang adegan (AI)**, request desain visual memakai Kie.ai key yang sudah ada di Kode Akses.
+
+### Mengaktifkan render GitHub Actions
+
+Buat GitHub App untuk OAuth dan set callback URL tepat ke `GITHUB_APP_CALLBACK_URL`. Izin minimum yang dibutuhkan: **Repository creation: write** pada izin akun, serta **Contents: write**, **Workflows: write**, dan **Actions: write** untuk repo. Simpan client ID, client secret, dan session secret sebagai secret server-only pada platform deployment; jangan memakai prefiks `VITE_`.
+
+Saat user pertama kali tersambung, aplikasi otomatis membuat repo privat `auto-remotion-render` (atau nama alternatif jika nama tersebut sudah dipakai), lalu memasang workflow runner. User cukup menekan **Render video**; ketika GitHub terhubung, editor memakai Actions di akun mereka dan memasukkan MP4 hasilnya ke riwayat project lokal. Jika tidak terhubung, tombol yang sama tetap memakai renderer lokal.
 
 ## Perintah Development
 
@@ -241,7 +257,7 @@ Yang sudah tersedia:
 - Model Composition, Scene, Theme, dan timeline.
 - Planner generik berbasis heuristik.
 - AI Creative Director server function via Kie.ai.
-- Transkripsi audio per chunk.
+- Sinkron waktu lokal dari teks dan jeda audio, dengan koreksi batas scene lewat playhead.
 - Renderer Canvas dengan layout universal.
 - Preview audio dan canvas.
 - Export MP4/WebM melalui Mediabunny dan WebCodecs.

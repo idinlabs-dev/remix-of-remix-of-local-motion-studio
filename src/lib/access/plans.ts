@@ -31,7 +31,7 @@ export const PLANS: Record<PlanId, Plan> = {
       "Durasi maks 90 detik / video",
       "Mode Explainer: audio + teks narasi → video animasi",
       "AI Creative Director: tema, layout & objek otomatis",
-      "Auto-transkrip & subtitle sorot kata",
+      "Sinkron waktu lokal & subtitle sorot kata",
       "Render MP4 langsung di device",
     ],
   },

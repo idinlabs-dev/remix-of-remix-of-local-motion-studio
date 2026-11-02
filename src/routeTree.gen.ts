@@ -10,11 +10,21 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GalleryRouteImport } from './routes/gallery'
 import { Route as ProjectIdRouteImport } from './routes/project.$id'
+import { Route as ApiGithubArtifactRouteImport } from './routes/api/github/artifact'
+import { Route as ApiGithubCallbackRouteImport } from './routes/api/github/callback'
+import { Route as ApiGithubConnectRouteImport } from './routes/api/github/connect'
+import { Route as ApiGithubRenderRouteImport } from './routes/api/github/render'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GalleryRoute = GalleryRouteImport.update({
+  id: '/gallery',
+  path: '/gallery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectIdRoute = ProjectIdRouteImport.update({
@@ -22,31 +32,93 @@ const ProjectIdRoute = ProjectIdRouteImport.update({
   path: '/project/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGithubArtifactRoute = ApiGithubArtifactRouteImport.update({
+  id: '/api/github/artifact',
+  path: '/api/github/artifact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
+  id: '/api/github/callback',
+  path: '/api/github/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubConnectRoute = ApiGithubConnectRouteImport.update({
+  id: '/api/github/connect',
+  path: '/api/github/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubRenderRoute = ApiGithubRenderRouteImport.update({
+  id: '/api/github/render',
+  path: '/api/github/render',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
+  '/api/github/artifact': typeof ApiGithubArtifactRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/render': typeof ApiGithubRenderRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
+  '/api/github/artifact': typeof ApiGithubArtifactRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/render': typeof ApiGithubRenderRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
+  '/api/github/artifact': typeof ApiGithubArtifactRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/render': typeof ApiGithubRenderRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/project/$id'
+  fullPaths:
+    | '/'
+    | '/gallery'
+    | '/project/$id'
+    | '/api/github/artifact'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/render'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/project/$id'
-  id: '__root__' | '/' | '/project/$id'
+  to:
+    | '/'
+    | '/gallery'
+    | '/project/$id'
+    | '/api/github/artifact'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/render'
+  id:
+    | '__root__'
+    | '/'
+    | '/gallery'
+    | '/project/$id'
+    | '/api/github/artifact'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/render'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  GalleryRoute: typeof GalleryRoute
   ProjectIdRoute: typeof ProjectIdRoute
+  ApiGithubArtifactRoute: typeof ApiGithubArtifactRoute
+  ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
+  ApiGithubConnectRoute: typeof ApiGithubConnectRoute
+  ApiGithubRenderRoute: typeof ApiGithubRenderRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,6 +130,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gallery': {
+      id: '/gallery'
+      path: '/gallery'
+      fullPath: '/gallery'
+      preLoaderRoute: typeof GalleryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/project/$id': {
       id: '/project/$id'
       path: '/project/$id'
@@ -65,12 +144,45 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/github/artifact': {
+      id: '/api/github/artifact'
+      path: '/api/github/artifact'
+      fullPath: '/api/github/artifact'
+      preLoaderRoute: typeof ApiGithubArtifactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/callback': {
+      id: '/api/github/callback'
+      path: '/api/github/callback'
+      fullPath: '/api/github/callback'
+      preLoaderRoute: typeof ApiGithubCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/connect': {
+      id: '/api/github/connect'
+      path: '/api/github/connect'
+      fullPath: '/api/github/connect'
+      preLoaderRoute: typeof ApiGithubConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/render': {
+      id: '/api/github/render'
+      path: '/api/github/render'
+      fullPath: '/api/github/render'
+      preLoaderRoute: typeof ApiGithubRenderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  GalleryRoute: GalleryRoute,
   ProjectIdRoute: ProjectIdRoute,
+  ApiGithubArtifactRoute: ApiGithubArtifactRoute,
+  ApiGithubCallbackRoute: ApiGithubCallbackRoute,
+  ApiGithubConnectRoute: ApiGithubConnectRoute,
+  ApiGithubRenderRoute: ApiGithubRenderRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

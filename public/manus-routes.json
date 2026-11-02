@@ -3,6 +3,14 @@
     {
       "path": "/",
       "title": "Auto Remotion Studio — AI Motion Video Studio"
+    },
+    {
+      "path": "/gallery",
+      "title": "Gallery"
+    },
+    {
+      "path": "/project/:id",
+      "title": "Editor Project"
     }
   ]
 }

@@ -143,7 +143,7 @@
   }
 }
 
-/* Palet studio: kertas kotak-kotak, tinta navy, marker oranye. */
+/* Palet studio clean: kanvas putih, tinta navy, aksen seperlunya. */
 :root {
   --background: oklch(0.982 0.006 100);
   --foreground: oklch(0.27 0.055 265);
@@ -164,11 +164,8 @@
 
 @layer utilities {
   .grid-paper {
-    background-color: var(--color-background);
-    background-image:
-      linear-gradient(var(--color-border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--color-border) 1px, transparent 1px);
-    background-size: 28px 28px;
+    background-color: #ffffff;
+    background-image: none;
   }
 }
 

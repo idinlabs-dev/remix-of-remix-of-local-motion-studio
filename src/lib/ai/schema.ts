@@ -83,13 +83,11 @@ export type DesignScene = z.infer<typeof designSceneSchema>;
 
 export type AiFailReason = "no-access" | "no-credit" | "api-error" | "parse-error" | "limit";
 
-export type DesignResponse = { ok: true; plan: DesignPlan } | { ok: false; reason: AiFailReason; message: string };
-
-export type TranscribeResponse = { ok: true; texts: string[] } | { ok: false; reason: AiFailReason; message: string };
+export type DesignResponse =
+  { ok: true; plan: DesignPlan } | { ok: false; reason: AiFailReason; message: string };
 
 export type VerifyResponse =
-  | { ok: true; plan: "starter" | "pro" }
-  | { ok: false; reason: AiFailReason; message: string };
+  { ok: true; plan: "starter" | "pro" } | { ok: false; reason: AiFailReason; message: string };
 
 /** JSON Schema untuk tool "submit_design" (format Anthropic input_schema). */
 export const DESIGN_TOOL = {
@@ -133,7 +131,11 @@ export const DESIGN_TOOL = {
             icon: { type: "string" },
             items: {
               type: "array",
-              items: { type: "object", properties: { label: { type: "string" }, icon: { type: "string" } }, required: ["label"] },
+              items: {
+                type: "object",
+                properties: { label: { type: "string" }, icon: { type: "string" } },
+                required: ["label"],
+              },
             },
             keywords: { type: "array", items: { type: "string" } },
             stickers: {
@@ -159,7 +161,11 @@ export const DESIGN_TOOL = {
   },
 } as const;
 
-export function designPrompt(input: { mode: Mode; aspect: string; scenes: { text: string; seconds: number }[] }): string {
+export function designPrompt(input: {
+  mode: Mode;
+  aspect: string;
+  scenes: { text: string; seconds: number }[];
+}): string {
   const editRules =
     input.mode === "edit"
       ? `
@@ -192,7 +198,10 @@ LANGKAH BERPIKIR:
 ${editRules}
 
 ATURAN TEKS: semua teks (headline, sub, label) memakai BAHASA YANG SAMA dengan narasi, singkat & punchy (headline maks 7 kata, label maks 4 kata). Jangan mengarang fakta di luar narasi.
-ATURAN IKON: field icon/items[].icon/stickers[].icon HANYA boleh dari daftar ini: ${ICON_NAMES.join(", ")}.
+ATURAN IKON & RELEVANSI: field icon/items[].icon/stickers[].icon HANYA boleh dari daftar ini: ${ICON_NAMES.join(", ")}.
+- Ikon utama wajib mewakili benda, proses, atau konsep konkret yang benar-benar disebut/diterangkan pada kalimat scene yang sama. Jangan memilih ikon hanya karena topik umumnya mirip.
+- Setiap item harus punya label dan ikon yang saling cocok. Untuk kalimat tentang mekanisme fisik, pilih objek/proses mekanismenya (mis. piston/mesin → cog, bahan bakar → fuel, panas/pembakaran → flame, tekanan → gauge), bukan simbol salju/planet/atom yang tak disebut.
+- Jangan mengulang ikon yang sama di scene berurutan kecuali objek yang sama memang tetap menjadi fokus. Jika tidak ada ikon spesifik yang cocok, pilih layout quote/list berbasis teks dan gunakan ikon netral secukupnya.
 JUMLAH: scenes HARUS tepat ${input.scenes.length} item, urut sama dengan kalimat.
 
 Rasio video: ${input.aspect}.
