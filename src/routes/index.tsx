@@ -82,7 +82,7 @@ function AccessDialog({
         <DialogHeader>
           <DialogTitle>Aktifkan Kode Akses</DialogTitle>
           <DialogDescription>
-            Kode diverifikasi di server, tetapi kunci layanan tidak pernah ditampilkan di browser.
+            Masukkan kode dari admin. Paket ditentukan oleh prefiks kode; API key dan kredit diperiksa manual oleh admin.
           </DialogDescription>
         </DialogHeader>
         <Input

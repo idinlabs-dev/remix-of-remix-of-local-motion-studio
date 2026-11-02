@@ -97,7 +97,7 @@ Tema, warna, font, background prosedural, partikel, ikon, dan stiker tidak di-ha
 
 ## Paket Akses
 
-Auto Remotion Studio tidak menggunakan sistem login atau database pengguna. Akses diberikan melalui kode lisensi yang diverifikasi server.
+Auto Remotion Studio tidak menggunakan sistem login atau database pengguna. Aktivasi hanya memeriksa format kode dan prefiks paket; admin bertanggung jawab memeriksa API key/kredit sebelum membagikan kode.
 
 | Paket | Harga promo | Kuota | Durasi maksimal | Fitur utama |
 | --- | ---: | ---: | ---: | --- |
@@ -111,7 +111,7 @@ Harga coret promo:
 
 Kode yang diawali `PRO-` dibaca sebagai paket Pro. Kode Starter menggunakan prefix `STARTER-` atau `STR-`. Status penggunaan disimpan di browser/device pengguna.
 
-> Penghapusan data browser dapat menghapus catatan kuota lokal. Validasi dan pembatasan saldo layanan AI tetap berada di backend Kie.ai.
+> Penghapusan data browser dapat menghapus catatan kuota lokal. Situs tidak mengakses endpoint saldo Kie.ai; request fitur desain AI dikirim ke provider saat fitur digunakan dan dapat ditolak oleh provider.
 
 ## Pembayaran
 
