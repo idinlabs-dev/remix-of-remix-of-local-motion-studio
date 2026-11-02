@@ -6,11 +6,23 @@ import { zipSync, strToU8 } from "fflate";
 
 import type { Composition } from "@/lib/engine/types";
 import { FONT_DISPLAY } from "@/lib/engine/themes";
+import {
+  composeGeneratedProject,
+  defaultGeneratedManifest,
+  validateGeneratedProject,
+  type GeneratedProjectSource,
+} from "./generated-project";
 
 export interface ZipMedia {
   audio?: { name: string; blob: Blob } | null;
   bg?: { name: string; blob: Blob } | null;
   video?: { name: string; blob: Blob } | null;
+  srt?: string | null;
+}
+
+export interface RemotionZipOptions {
+  generatedSource?: GeneratedProjectSource | null;
+  generatedManifest?: Parameters<typeof composeGeneratedProject>[1] | null;
 }
 
 function ext(name: string, fallback: string) {
@@ -21,7 +33,11 @@ function ext(name: string, fallback: string) {
 const PACKAGE_JSON = (title: string) =>
   JSON.stringify(
     {
-      name: title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "auto-remotion-video",
+      name:
+        title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") || "auto-remotion-video",
       version: "1.0.0",
       private: true,
       scripts: {
@@ -248,6 +264,7 @@ export const Main: React.FC<{ timeline: any }> = ({ timeline }) => {
               {spk === "full" && t.media.video ? <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
               {spk === "pip" && t.media.video ? (<div style={{ position: "absolute", right: "5%", bottom: "28%", width: "30%", aspectRatio: "4 / 5", borderRadius: 30, overflow: "hidden", border: "8px solid #fff", boxShadow: "14px 14px 0 " + theme.accent }}>
                 <OffthreadVideo src={staticFile(t.media.video)} startFrom={from} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>) : null}
+              {scene.generatedVisual ? <div style={{ position: "absolute", top: "5%", left: "7%", right: "7%", color: scene.generatedAccent || theme.accent, fontSize: U * 0.028, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", opacity: 0.9 }}>{scene.generatedVisual}</div> : null}
               <SceneView scene={scene} theme={spk === "full" ? { ...theme, ink: "#fff" } : theme} font={font} U={U} />
               <Stickers scene={scene} theme={theme} U={U} />
               {t.subtitleOn ? <Subtitle scene={scene} theme={theme} mode={t.mode} U={U} /> : null}
@@ -278,7 +295,11 @@ npm run render      # render ke out/video.mp4
 - Font tema: muat via \`@remotion/google-fonts\` bila ingin persis sama.
 `;
 
-export async function buildRemotionZip(comp: Composition, media: ZipMedia): Promise<Blob> {
+export async function buildRemotionZip(
+  comp: Composition,
+  media: ZipMedia,
+  options: RemotionZipOptions = {},
+): Promise<Blob> {
   const files: Record<string, Uint8Array> = {};
   const mediaPaths: { audio?: string; bg?: string; video?: string } = {};
   if (media.audio) {
@@ -302,14 +323,46 @@ export async function buildRemotionZip(comp: Composition, media: ZipMedia): Prom
     fontFamily: FONT_DISPLAY[comp.theme.font].family,
     media: mediaPaths,
   };
+  const generated =
+    options.generatedSource ??
+    composeGeneratedProject(
+      comp,
+      options.generatedManifest ?? defaultGeneratedManifest(comp),
+      timeline,
+    );
+  const validation = validateGeneratedProject(generated);
+  if (!validation.ok)
+    throw new Error(`Source Remotion tidak aman: ${validation.errors.join(", ")}`);
+  const srt =
+    media.srt ??
+    comp.scenes
+      .map((scene, i) => {
+        const stamp = (seconds: number) => {
+          const ms = Math.round(seconds * 1000);
+          const h = Math.floor(ms / 3600000);
+          const m = Math.floor(ms / 60000) % 60;
+          const s = Math.floor(ms / 1000) % 60;
+          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
+        };
+        return `${i + 1}\n${stamp(scene.start)} --> ${stamp(scene.end)}\n${scene.text}\n`;
+      })
+      .join("\n");
   files["package.json"] = strToU8(PACKAGE_JSON(comp.title));
   files["tsconfig.json"] = strToU8(TSCONFIG);
   files["remotion.config.ts"] = strToU8(REMOTION_CONFIG);
   files["README.md"] = strToU8(README(comp.title));
   files["src/index.ts"] = strToU8(INDEX_TS);
-  files["src/Root.tsx"] = strToU8(ROOT_TSX);
-  files["src/Main.tsx"] = strToU8(MAIN_TSX);
+  files["src/Root.tsx"] = strToU8(generated.files["src/Root.tsx"] ?? ROOT_TSX);
+  files["src/Video.tsx"] = strToU8(
+    generated.files["src/Video.tsx"] ?? MAIN_TSX.replace("export const Main", "export const Video"),
+  );
+  files["src/StudioVisual.tsx"] = strToU8(MAIN_TSX);
+  files["timing.json"] = strToU8(
+    generated.files["timing.json"] ?? JSON.stringify(timeline, null, 2),
+  );
+  for (const [path, content] of Object.entries(generated.files)) files[path] = strToU8(content);
   files["src/timeline.json"] = strToU8(JSON.stringify(timeline, null, 2));
+  files["public/subtitles.srt"] = strToU8(srt);
   const zipped = zipSync(files, { level: 6 });
   return new Blob([zipped as BlobPart], { type: "application/zip" });
 }

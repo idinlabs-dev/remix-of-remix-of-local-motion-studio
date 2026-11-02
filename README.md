@@ -152,6 +152,7 @@ src/
 │   │   ├── ai.functions.ts     # Server functions AI
 │   │   ├── kie.server.ts       # Client server Kie.ai
 │   │   ├── schema.ts           # Schema Zod dan prompt Creative Director
+│   │   └── generated-project-schema.ts # Kontrak manifest visual source per konten
 │   ├── encode/
 │   │   ├── exporter.ts          # Render Canvas dan encode WebCodecs
 │   ├── engine/
@@ -163,7 +164,8 @@ src/
 │   │   ├── timing.ts             # Timing kalimat, estimasi lokal, dan jeda audio
 │   │   └── types.ts              # Model Composition dan Scene
 │   ├── export/
-│   │   └── remotion-zip.ts      # Generator source project Remotion
+│   │   ├── remotion-zip.ts      # Generator source project Remotion + media/SRT
+│   │   └── generated-project.ts # Composer dan validator source AI per konten
 │   ├── github/
 │   │   ├── github.server.ts     # OAuth, token session, provisioning repo, dan render API
 │   │   ├── runner-template.ts   # Workflow GitHub Actions statis

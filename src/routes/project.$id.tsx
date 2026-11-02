@@ -22,7 +22,7 @@ import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { designScenes } from "@/lib/ai/ai.functions";
+import { designScenes, generateRemotionProject } from "@/lib/ai/ai.functions";
 import type { DesignResponse } from "@/lib/ai/schema";
 import { checkAiGate, checkRenderGate } from "@/lib/access/plans";
 import { markProjectUsed, useAccess } from "@/lib/access/store";
@@ -467,6 +467,10 @@ function EditorPage() {
       toast.error(gate.message);
       return;
     }
+    if (!access) {
+      toast.error("Masukkan Kode Akses untuk render video.");
+      return;
+    }
     setBusy("render");
     setProgress({ phase: "preparing", frame: 0, totalFrames: 0 });
     const controller = new AbortController();
@@ -478,11 +482,31 @@ function EditorPage() {
       let resultMessage: string;
       {
         setRemoteMessage("Menyiapkan video…");
-        const packageBlob = await buildRemotionZip(comp, {
-          audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
-          bg: bgRec ? { name: bgRec.name, blob: bgRec.blob } : null,
-          video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
+        const generated = await generateRemotionProject({
+          data: {
+            code: access.code,
+            title: comp.title,
+            mode: comp.mode,
+            aspect: comp.aspect,
+            scenes: comp.scenes.map((scene) => ({
+              id: scene.id,
+              text: scene.text,
+              start: scene.start,
+              end: scene.end,
+            })),
+          },
         });
+        if (!generated.ok) throw new Error(generated.message);
+        setRemoteMessage("Menyusun source Remotion khusus konten…");
+        const packageBlob = await buildRemotionZip(
+          comp,
+          {
+            audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
+            bg: bgRec ? { name: bgRec.name, blob: bgRec.blob } : null,
+            video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
+          },
+          { generatedManifest: generated.manifest },
+        );
         if (packageBlob.size > 70 * 1024 * 1024) {
           throw new Error(
             "Ukuran media terlalu besar untuk render otomatis. Kurangi ukuran media lalu coba lagi.",

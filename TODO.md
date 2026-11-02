@@ -2,9 +2,12 @@
 
 ## Render final wajib GitHub
 
-- [ ] Tombol Render video tidak menjalankan renderer lokal.
+- [x] Tombol Render video tidak menjalankan renderer lokal.
 - [ ] Pengguna yang belum login menerima pesan “Silakan login terlebih dahulu untuk membuat video.” dan tombol menuju login GitHub.
-- [ ] Pengguna yang sudah login tetap memakai endpoint GitHub render, polling status, pengambilan MP4, dan riwayat render yang sudah ada.
+- [x] Pengguna yang sudah login tetap memakai endpoint GitHub render, polling status, pengambilan MP4, dan riwayat render yang sudah ada.
+- [x] Render GitHub meminta manifest visual AI per konten melalui Kie.ai/Claude, memvalidasi source, dan mengemas Video.tsx/Root.tsx/timing.json, audio, serta SRT.
+
+Catatan: preview browser dan ekspor project lama tetap memakai renderer lokal/generic sebagai fallback. Source AI dibatasi manifest terstruktur agar ukuran dan risiko source arbitrary tetap terkendali.
 
 ## Login dan navigasi
 
