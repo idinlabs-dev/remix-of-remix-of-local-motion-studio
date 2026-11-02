@@ -18,12 +18,14 @@ import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { planScenes, transcribeAudio } from "@/lib/ai/ai.functions";
-import type { PlanResponse, TranscribeResponse } from "@/lib/ai/schema";
-import { applyPlan, scenesFromTimings, genericScene } from "@/lib/engine/planner";
-import { buildFromTranscript, buildTimings, computeSilences, splitSentences, type TimedSentence } from "@/lib/engine/timing";
+import { designScenes, transcribeChunks } from "@/lib/ai/ai.functions";
+import type { DesignResponse, TranscribeResponse } from "@/lib/ai/schema";
+import { useAccess } from "@/lib/access/store";
+import { applyDesign, scenesFromTimings, genericScene } from "@/lib/engine/planner";
+import { alignChunks, buildTimings, chunkRanges, computeSilences, splitSentences, type TimedSentence } from "@/lib/engine/timing";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
 import { decodeAudio, renderComposition, type RenderProgress } from "@/lib/encode/exporter";
+import { toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
 import { getMedia, getProject, listRenders, putMedia, putRender, saveProject, type MediaRecord, type RenderRecord } from "@/lib/storage/db";
 
 export const Route = createFileRoute("/project/$id")({
@@ -65,6 +67,7 @@ function download(name: string, blob: Blob) {
 
 function EditorPage() {
   const { id } = Route.useParams();
+  const access = useAccess();
   const [comp, setComp] = useState<Composition | null>(null);
   const [missing, setMissing] = useState(false);
   const [audioRec, setAudioRec] = useState<MediaRecord | null>(null);
@@ -226,23 +229,32 @@ function EditorPage() {
       toast.error("Upload audio dulu untuk transkrip otomatis.");
       return;
     }
+    if (!access) {
+      toast.error("Masukkan Kode Akses dulu untuk memakai transkrip AI.");
+      return;
+    }
     if (audioRec.blob.size > MAX_TRANSCRIBE_BYTES) {
       toast.error("Audio terlalu besar untuk transkrip (maks 18 MB). Potong dulu atau tempel teks manual.");
       return;
     }
     setBusy("transcribe");
     try {
-      const base64 = await blobToBase64(audioRec.blob);
-      const res: TranscribeResponse = await transcribeAudio({ data: { audioBase64: base64, mime: audioRec.mime } });
+      const audio = decoded ?? (await decodeAudio(audioRec.blob));
+      if (!decoded) setDecoded(audio);
+      const silences = computeSilences(audio.getChannelData(0), audio.sampleRate);
+      const ranges = chunkRanges(silences, audio.duration);
+      const mono16k = await toMono16k(audio);
+      const chunks = wavChunksBase64(mono16k, ranges);
+      const res: TranscribeResponse = await transcribeChunks({ data: { code: access.code, chunks } });
       if (!res.ok) {
-        toast.error(res.reason === "no-key" ? (res.message ?? "Kunci AI belum diisi.") : "Transkrip gagal: " + (res.message ?? ""));
+        toast.error("Transkrip gagal: " + res.message);
         return;
       }
-      setNarration(res.fullText);
-      const duration = decoded?.duration ?? Math.max(...res.items.map((i) => i.end), 1);
-      const timings = buildFromTranscript(res.items, duration);
+      const timedChunks = ranges.map((range, i) => ({ ...range, text: res.texts[i] ?? "" }));
+      const timings = alignChunks(timedChunks, silences, audio.duration);
+      setNarration(timings.map((t) => t.text).join(" "));
       await persist(scenesFromTimings(comp, timings));
-      toast.success(`Transkrip: ${res.items.length} kalimat.`);
+      toast.success(`Transkrip: ${timings.length} kalimat.`);
     } catch {
       toast.error("Transkrip gagal — coba lagi.");
     } finally {
@@ -255,14 +267,25 @@ function EditorPage() {
       toast.error("Susun timeline dulu (sinkron waktu), baru rancang adegan.");
       return;
     }
+    if (!access) {
+      toast.error("Masukkan Kode Akses dulu untuk memakai AI Creative Director.");
+      return;
+    }
     setBusy("plan");
     try {
-      const res: PlanResponse = await planScenes({ data: { sentences: comp.scenes.map((s) => s.text) } });
+      const res: DesignResponse = await designScenes({
+        data: {
+          code: access.code,
+          mode: comp.mode,
+          aspect: comp.aspect,
+          scenes: comp.scenes.map((s) => ({ text: s.text, seconds: s.end - s.start })),
+        },
+      });
       if (!res.ok) {
-        toast.error(res.reason === "no-key" ? (res.message ?? "Kunci AI belum diisi.") : "AI gagal: " + (res.message ?? ""));
+        toast.error("AI gagal: " + res.message);
         return;
       }
-      await persist(applyPlan(comp, { scenes: res.scenes }));
+      await persist(applyDesign(comp, res.plan));
       toast.success("Adegan dirancang AI.");
     } catch {
       toast.error("Gagal menyusun rencana adegan.");
@@ -518,7 +541,10 @@ function EditorPage() {
                     <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary">#{i + 1}</span>
                       <span>{scene.start.toFixed(1)}s – {scene.end.toFixed(1)}s</span>
-                      <span className="truncate">{scene.elements.map((e) => e.kind).join(", ")}</span>
+                      <span className="truncate">
+                        {scene.layout}
+                        {scene.items?.length ? ` · ${scene.items.length} item` : ""}
+                      </span>
                       <Button variant="ghost" size="sm" className="ml-auto" onClick={() => void regenerateScene(i)}>
                         <RefreshCcw className="size-3.5" /> Generik
                       </Button>
