@@ -1,7 +1,7 @@
-// Peta ikon lucide (dipilih manual supaya bundel tetap kecil) + penggambar
-// canvas dengan efek "digambar" (draw-on).
+// Peta ikon lucide (dipilih manual supaya bundel tetap kecil) (dipakai penggambar di icons.ts)
 
-/* eslint-disable */
+
+
 import {
   Mountain as I_Mountain,
   MountainSnow as I_MountainSnow,
@@ -203,10 +203,12 @@ import {
   Turtle as I_Turtle,
   Snail as I_Snail,
   Egg as I_Egg,
-  type IconNode,
+
 } from "lucide";
 
-import { safeIcon, type IconName } from "./icon-names";
+import type { IconName } from "./icon-names";
+
+export type IconNode = [tag: string, attrs: Record<string, string | number | undefined>][];
 
 export const ICONS: Record<IconName, IconNode> = {
   "mountain": I_Mountain,
