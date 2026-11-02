@@ -12,6 +12,16 @@ export interface TimedSentence {
   end: number;
 }
 
+export interface AlignedWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface AlignedSentence extends TimedSentence {
+  words: { word: string; start: number; end: number }[];
+}
+
 /** Pecah teks narasi jadi kalimat, menyatukan potongan terlalu pendek. */
 export function splitSentences(text: string): string[] {
   const cleaned = text.replace(/\s+/g, " ").trim();
@@ -91,31 +101,34 @@ export function buildTimings(
 
   const boundariesNeeded = sentences.length - 1;
   const boundaries: number[] = [];
-  if (midpoints.length >= boundariesNeeded && boundariesNeeded > 0) {
-    // Pilih boundary yang paling merata di antara midpoint yang tersedia.
-    for (let i = 1; i <= boundariesNeeded; i++) {
-      const ideal = (i / (boundariesNeeded + 1)) * duration;
-      const first = midpoints[0] ?? ideal;
-      let best = first;
-      let bestDist = Math.abs(first - ideal);
-      for (const m of midpoints) {
-        const d = Math.abs(m - ideal);
-        if (d < bestDist) {
-          best = m;
-          bestDist = d;
-        }
-      }
-      boundaries.push(best);
-    }
-    boundaries.sort((a, b) => a - b);
-  } else {
-    // Fallback: bagi berbobot panjang karakter.
-    const weights = sentences.map((s) => Math.max(s.length, 4));
+  if (boundariesNeeded > 0) {
+    // Estimate each target from spoken word counts, then snap to a nearby
+    // distinct pause. Use available pauses even when there are fewer pauses
+    // than scene boundaries; never reuse a pause.
+    const weights = sentences.map((s) => Math.max(1, s.trim().split(/\s+/).length));
     const totalWeight = weights.reduce((a, b) => a + b, 0);
-    let acc = 0;
+    const snapRadius = Math.max(0.35, Math.min(1.2, (duration / (boundariesNeeded + 1)) * 0.45));
+    let cumulative = 0;
+    let candidateIndex = 0;
     for (let i = 0; i < boundariesNeeded; i++) {
-      acc += weights[i] ?? 0;
-      boundaries.push((acc / totalWeight) * duration);
+      cumulative += weights[i] ?? 1;
+      const target = (cumulative / totalWeight) * duration;
+      while (
+        candidateIndex < midpoints.length &&
+        (midpoints[candidateIndex] ?? 0) < target - snapRadius
+      )
+        candidateIndex++;
+      let snapped: number | undefined;
+      if (
+        candidateIndex < midpoints.length &&
+        Math.abs((midpoints[candidateIndex] ?? 0) - target) <= snapRadius
+      ) {
+        snapped = midpoints[candidateIndex];
+        candidateIndex++;
+      }
+      const lower = (boundaries.at(-1) ?? 0) + 0.3;
+      const upper = duration - (boundariesNeeded - i) * 0.3;
+      boundaries.push(Math.max(lower, Math.min(upper, snapped ?? target)));
     }
   }
 
@@ -195,7 +208,8 @@ export function chunkRanges(
     const ideal = start + target;
     const cands = mids.filter((m) => m > start + target * 0.5 && m <= start + maxLen);
     let cut = ideal;
-    for (const m of cands) if (Math.abs(m - ideal) < Math.abs(cut - ideal) || cut === ideal) cut = m;
+    for (const m of cands)
+      if (Math.abs(m - ideal) < Math.abs(cut - ideal) || cut === ideal) cut = m;
     out.push({ start, end: cut });
     start = cut;
   }
@@ -232,5 +246,67 @@ export function alignChunks(
   if (first) first.start = 0;
   const last = out[out.length - 1];
   if (last) last.end = Math.max(last.end, duration);
+  return out;
+}
+
+function normalizeToken(text: string): string {
+  return text
+    .toLocaleLowerCase()
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** Cocokkan waktu kata dari forced aligner ke skrip; menolak mismatch agar tidak diam-diam drift. */
+export function alignScriptToWords(
+  sentences: string[],
+  aligned: AlignedWord[],
+  duration: number,
+): AlignedSentence[] | null {
+  if (!sentences.length || !aligned.length || !Number.isFinite(duration) || duration <= 0)
+    return null;
+  const scriptWords = sentences.flatMap((sentence) => sentence.trim().split(/\s+/).filter(Boolean));
+  if (scriptWords.length !== aligned.length) return null;
+  for (let i = 0; i < scriptWords.length; i++) {
+    const word = aligned[i];
+    if (!word || normalizeToken(scriptWords[i] ?? "") !== normalizeToken(word.text)) return null;
+    if (
+      !Number.isFinite(word.start) ||
+      !Number.isFinite(word.end) ||
+      word.start < 0 ||
+      word.end <= word.start ||
+      word.start > duration
+    )
+      return null;
+    if (i > 0 && word.start < (aligned[i - 1]?.start ?? 0)) return null;
+  }
+
+  const grouped: { word: string; start: number; end: number }[][] = [];
+  let cursor = 0;
+  for (const sentence of sentences) {
+    const group: { word: string; start: number; end: number }[] = [];
+    for (const word of sentence.trim().split(/\s+/).filter(Boolean)) {
+      const span = aligned[cursor++];
+      if (!span) return null;
+      group.push({ word, start: Math.max(0, span.start), end: Math.min(duration, span.end) });
+    }
+    grouped.push(group);
+  }
+
+  const boundaries = grouped.slice(0, -1).map((group, i) => {
+    const last = group.at(-1);
+    const first = grouped[i + 1]?.[0];
+    if (!last || !first) return last?.end ?? 0;
+    return Math.max(last.end, Math.min(first.start, (last.end + first.start) / 2));
+  });
+  const out: AlignedSentence[] = [];
+  let start = 0;
+  for (let i = 0; i < sentences.length; i++) {
+    const words = grouped[i] ?? [];
+    const end = i < boundaries.length ? (boundaries[i] ?? duration) : duration;
+    if (end <= start || words.some((word) => word.start < start - 0.1 || word.end > end + 0.1))
+      return null;
+    out.push({ text: sentences[i] ?? "", start, end, words });
+    start = end;
+  }
   return out;
 }

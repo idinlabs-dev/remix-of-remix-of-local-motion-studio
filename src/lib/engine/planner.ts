@@ -20,6 +20,13 @@ const NEUTRAL_ICONS: IconName[] = ["lightbulb", "sparkles", "target", "eye", "st
 
 /** Kamus kata kunci → ikon (Indonesia + Inggris), untuk mode tanpa AI. */
 const KEYWORD_ICONS: [RegExp, IconName][] = [
+  [/piston|silinder|cylinder|mesin|engine|mekanik|mechanical/i, "cog"],
+  [/bahan bakar|bensin|fuel|gasoline/i, "fuel"],
+  [/pembakaran|combustion|\bpanas\b|\bheat\b|thermal/i, "flame"],
+  [/energi kinetik|kinetik|kinetic|listrik|electric|tegangan/i, "zap"],
+  [/tekanan|pressure|manometer/i, "gauge"],
+  [/gesekan|friction/i, "cog"],
+  [/cairan|fluida|fluid|oli|\boil\b/i, "droplet"],
   [/gunung|mountain|puncak|summit|daki/i, "mountain"],
   [/hutan|pohon|forest|tree/i, "tree-pine"],
   [/hantu|ghost|arwah|setan/i, "ghost"],
@@ -36,8 +43,8 @@ const KEYWORD_ICONS: [RegExp, IconName][] = [
   [/perang|war|tentara|army|battle/i, "swords"],
   [/kesehatan|health|sehat|jantung|heart/i, "heart-pulse"],
   [/makan|food|masak|cook/i, "utensils"],
-  [/air|water|laut|ocean|sea|sungai/i, "waves"],
-  [/api|fire|panas|hot|bakar/i, "flame"],
+  [/\bair\b|water|laut|ocean|sea|sungai/i, "waves"],
+  [/\bapi\b|fire|hot|bakar/i, "flame"],
   [/dingin|cold|salju|snow|es\b/i, "snowflake"],
   [/hujan|rain|badai|storm/i, "cloud-rain"],
   [/teknologi|technology|komputer|computer|ai\b|robot/i, "cpu"],
@@ -55,8 +62,14 @@ const KEYWORD_ICONS: [RegExp, IconName][] = [
   [/kenapa|mengapa|why|bagaimana|how|apa\b|what/i, "circle-help"],
 ];
 
-export function guessIcon(text: string, index: number): IconName {
+export function explicitIcon(text: string): IconName | undefined {
   for (const [re, icon] of KEYWORD_ICONS) if (re.test(text)) return icon;
+  return undefined;
+}
+
+export function guessIcon(text: string, index: number): IconName {
+  const match = explicitIcon(text);
+  if (match) return match;
   return NEUTRAL_ICONS[index % NEUTRAL_ICONS.length] ?? "sparkles";
 }
 
@@ -172,15 +185,23 @@ export function applyDesign(comp: Composition, plan: DesignPlan): Composition {
       start: scene.start,
       end: scene.end,
       text: scene.text,
+      timedWords: scene.timedWords,
       layout: comp.mode === "explainer" && d.layout === "speaker" ? "icon" : d.layout,
       transition: d.transition,
       headline: d.headline,
       sub: d.sub,
       value: d.value,
-      icon: d.icon ? safeIcon(d.icon) : undefined,
-      items: d.items?.map((it) => ({ label: it.label, icon: it.icon ? safeIcon(it.icon) : undefined })),
+      icon: explicitIcon(scene.text) ?? (d.icon ? safeIcon(d.icon) : undefined),
+      items: d.items?.map((it, itemIndex) => ({
+        label: it.label,
+        icon:
+          explicitIcon(it.label) ??
+          (it.icon
+            ? safeIcon(it.icon)
+            : (explicitIcon(scene.text) ?? guessIcon(it.label, i + itemIndex))),
+      })),
       keywords: d.keywords,
-      stickers: d.stickers?.map((s) => ({ ...s, icon: safeIcon(s.icon) })),
+      stickers: d.stickers?.map((s) => ({ ...s, icon: explicitIcon(scene.text) ?? safeIcon(s.icon) })),
       speaker: comp.mode === "edit" ? d.speaker : undefined,
     };
     return next;

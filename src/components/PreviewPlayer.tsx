@@ -13,9 +13,16 @@ interface PreviewPlayerProps {
   audioUrl?: string | null;
   videoUrl?: string | null;
   assets?: RenderAssets;
+  onTimeChange?: (time: number) => void;
 }
 
-export function PreviewPlayer({ comp, audioUrl, videoUrl, assets }: PreviewPlayerProps) {
+export function PreviewPlayer({
+  comp,
+  audioUrl,
+  videoUrl,
+  assets,
+  onTimeChange,
+}: PreviewPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -23,11 +30,13 @@ export function PreviewPlayer({ comp, audioUrl, videoUrl, assets }: PreviewPlaye
   const clockRef = useRef(0);
   const lastTickRef = useRef(0);
   const lastUiRef = useRef(0);
+  const onTimeChangeRef = useRef(onTimeChange);
   const stateRef = useRef({ comp, assets, playing: false, videoUrl, audioUrl });
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
 
   stateRef.current = { comp, assets, playing, videoUrl, audioUrl };
+  onTimeChangeRef.current = onTimeChange;
 
   const drawAt = (t: number) => {
     const canvas = canvasRef.current;
@@ -87,6 +96,7 @@ export function PreviewPlayer({ comp, audioUrl, videoUrl, assets }: PreviewPlaye
       if (t - lastUiRef.current > 0.1 || t < lastUiRef.current) {
         lastUiRef.current = t;
         setTime(t);
+        onTimeChangeRef.current?.(t);
       }
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -129,6 +139,7 @@ export function PreviewPlayer({ comp, audioUrl, videoUrl, assets }: PreviewPlaye
     else clockRef.current = t;
     drawAt(t);
     setTime(t);
+    onTimeChangeRef.current?.(t);
   };
 
   const restart = () => {

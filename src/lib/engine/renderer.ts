@@ -175,7 +175,9 @@ function isKeyword(word: string, keywords: string[] | undefined): boolean {
 }
 
 function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: number, U: number, theme: Theme, zone: number) {
-  const words = wordTimings(scene.text, scene.start, scene.end - scene.start);
+  const words = scene.timedWords?.length
+    ? scene.timedWords
+    : wordTimings(scene.text, scene.start, scene.end - scene.start);
   if (words.length === 0) return;
   const fontSize = Math.round(U * 0.046);
   ctx.save();
@@ -201,7 +203,8 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
   }
   if (cur.length > 0) lines.push({ words: cur, width: curW });
   // tampilkan maksimal 3 baris di sekitar kata aktif
-  const activeIdx = Math.max(0, words.findIndex((wt) => time >= wt.start && time < wt.end));
+  const foundIdx = words.findIndex((wt) => time >= wt.start && time < wt.end);
+  const activeIdx = Math.max(0, foundIdx);
   let acc = 0;
   let activeLine = 0;
   lines.forEach((l, i) => {
@@ -218,7 +221,7 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
   ctx.beginPath();
   ctx.roundRect(W * 0.05, startY - lineH / 2 - U * 0.015, W * 0.9, blockH + U * 0.03, U * 0.03);
   ctx.fill();
-  const active = words[activeIdx];
+  const active = foundIdx < 0 ? null : words[activeIdx];
   shown.forEach((line, li) => {
     let x = (W - line.width) / 2;
     const y = startY + li * lineH;
@@ -241,10 +244,15 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
 
 /** Caption punchy ala reels: 3-4 kata per kelompok, kata aktif membesar. */
 function drawPunchCaption(ctx: Ctx2D, scene: Scene, time: number, W: number, H: number, U: number, theme: Theme) {
-  const words = wordTimings(scene.text, scene.start, scene.end - scene.start);
+  const words = scene.timedWords?.length
+    ? scene.timedWords
+    : wordTimings(scene.text, scene.start, scene.end - scene.start);
   if (words.length === 0) return;
+  const hasAlignedWords = Boolean(scene.timedWords?.length);
+  if (hasAlignedWords && time < (words[0]?.start ?? 0)) return;
   const idx = words.findIndex((wt) => time >= wt.start && time < wt.end);
-  const activeIdx = idx < 0 ? words.length - 1 : idx;
+  const lastSpoken = words.reduce((last, wt, i) => (wt.end <= time ? i : last), -1);
+  const activeIdx = idx < 0 ? (lastSpoken < 0 ? 0 : lastSpoken) : idx;
   const group = Math.floor(activeIdx / 4);
   const chunk = words.slice(group * 4, group * 4 + 4);
   const fontSize = Math.round(U * 0.075);

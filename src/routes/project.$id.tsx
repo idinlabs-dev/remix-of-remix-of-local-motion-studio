@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  BookmarkPlus,
   Download,
   FileArchive,
   Film,
@@ -18,6 +19,14 @@ import {
 
 import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { designScenes, transcribeChunks } from "@/lib/ai/ai.functions";
@@ -27,12 +36,14 @@ import { markProjectUsed, useAccess } from "@/lib/access/store";
 import { applyDesign, scenesFromTimings, genericScene } from "@/lib/engine/planner";
 import {
   alignChunks,
+  alignScriptToWords,
   buildTimings,
   chunkRanges,
   computeSilences,
   splitSentences,
   type TimedSentence,
 } from "@/lib/engine/timing";
+import type { AlignedWord } from "@/lib/engine/timing";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
 import {
   decodeAudio,
@@ -41,7 +52,7 @@ import {
   type RenderProgress,
 } from "@/lib/encode/exporter";
 import { buildRemotionZip } from "@/lib/export/remotion-zip";
-import { toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
+import { encodeWav, toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
 import {
   getMedia,
   getProject,
@@ -77,6 +88,8 @@ export const Route = createFileRoute("/project/$id")({
 });
 
 const MAX_TRANSCRIBE_BYTES = 18 * 1024 * 1024;
+type AlignmentApiResponse =
+  { ok: true; words: AlignedWord[]; loss?: number | null } | { ok: false; message: string };
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -114,12 +127,26 @@ function EditorPage() {
   const [progress, setProgress] = useState<RenderProgress | null>(null);
   const [renders, setRenders] = useState<RenderRecord[]>([]);
   const [renderUrls, setRenderUrls] = useState<Record<string, string>>({});
+  const [alignmentAvailable, setAlignmentAvailable] = useState(false);
+  const [alignmentConsentOpen, setAlignmentConsentOpen] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/align", { headers: { Accept: "application/json" } })
+      .then((res) => res.json() as Promise<{ available?: boolean }>)
+      .then((data) => !cancelled && setAlignmentAvailable(data.available === true))
+      .catch(() => !cancelled && setAlignmentAvailable(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ---- muat project & media ----
   useEffect(() => {
@@ -324,10 +351,121 @@ function EditorPage() {
       toast.error("Tulis dulu teks narasinya.");
       return;
     }
-    await persist(
-      scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
-    );
+    const next = scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined);
+    next.narration = narration;
+    await persist(next);
     toast.success(`${timings.length} adegan tersusun.`);
+  };
+
+  const alignPrecisely = async () => {
+    if (!narration.trim()) {
+      toast.error("Tulis teks narasi dulu agar dapat disejajarkan dengan audio.");
+      return;
+    }
+    if (!audioRec && !videoRec) {
+      toast.error("Upload audio atau footage dengan track audio dulu.");
+      return;
+    }
+    if (!access) {
+      toast.error("Masukkan Kode Akses dulu.");
+      return;
+    }
+    let audio: AudioBuffer | null;
+    try {
+      audio =
+        decoded ??
+        (audioRec ? await decodeAudio(audioRec.blob) : await decodeVideoAudio(videoRec!.blob));
+    } catch {
+      toast.error("Audio tidak dapat dibaca. Coba WAV, MP3, atau MP4/WebM dengan codec umum.");
+      return;
+    }
+    if (!audio) {
+      toast.error("Tidak menemukan track audio yang bisa disejajarkan.");
+      return;
+    }
+    const gate = checkAiGate(access, {
+      projectId: comp.id,
+      durationSec: audio.duration,
+      mode: comp.mode,
+    });
+    if (!gate.ok) {
+      toast.error(gate.message);
+      return;
+    }
+    const sentences = splitSentences(narration);
+    if (!sentences.length) {
+      toast.error("Teks narasi belum berisi kalimat yang dapat disejajarkan.");
+      return;
+    }
+    setBusy("align");
+    try {
+      if (!decoded) setDecoded(audio);
+      const mono16k = await toMono16k(audio);
+      const wav = encodeWav(mono16k, 16_000);
+      if (wav.byteLength > 4_250_000) {
+        toast.error(
+          "Audio hasil konversi melewati batas upload. Pendekkan audio atau gunakan penanda manual.",
+        );
+        return;
+      }
+      const form = new FormData();
+      form.append("code", access.code);
+      form.append("text", narration.trim());
+      form.append("file", new Blob([wav as BlobPart], { type: "audio/wav" }), "narration.wav");
+      const response = await fetch("/api/align", { method: "POST", body: form });
+      const result = (await response.json()) as AlignmentApiResponse;
+      if (!response.ok || !result.ok) {
+        toast.error(result.ok ? "Sinkronisasi gagal." : result.message);
+        return;
+      }
+      const aligned = alignScriptToWords(sentences, result.words, audio.duration);
+      if (!aligned) {
+        toast.error(
+          "Kata hasil alignment tidak cocok persis dengan naskah. Periksa naskah/audio, lalu coba penanda manual.",
+        );
+        return;
+      }
+      const timed = scenesFromTimings(
+        comp,
+        aligned,
+        comp.mode === "edit" ? comp.duration : undefined,
+      );
+      timed.scenes = timed.scenes.map((scene, i) => ({ ...scene, timedWords: aligned[i]?.words }));
+      timed.narration = narration;
+      timed.updatedAt = Date.now();
+      await persist(timed);
+      markProjectUsed(comp.id);
+      setAlignmentConsentOpen(false);
+      toast.success(`Sinkron presisi selesai: ${aligned.length} adegan dan timestamp kata aktual.`);
+    } catch {
+      toast.error("Sinkron presisi gagal. Coba lagi atau gunakan penanda manual.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const markSceneStart = async (index: number) => {
+    if (index <= 0) {
+      toast.info("Adegan pertama selalu mulai dari 0 detik.");
+      return;
+    }
+    const prev = comp.scenes[index - 1];
+    const current = comp.scenes[index];
+    if (!prev || !current) return;
+    const min = prev.start + 0.3;
+    const max = current.end - 0.3;
+    if (max < min) {
+      toast.error("Jarak antar adegan terlalu pendek untuk dipindahkan.");
+      return;
+    }
+    const boundary = Math.max(min, Math.min(max, playhead));
+    const scenes = comp.scenes.map((scene, i) => {
+      if (i === index - 1) return { ...scene, end: boundary };
+      if (i === index) return { ...scene, start: boundary };
+      return scene;
+    });
+    await persist({ ...comp, scenes, updatedAt: Date.now() });
+    toast.success(`Batas adegan #${index + 1} dipindah ke ${boundary.toFixed(2)} dtk.`);
   };
 
   const transcribeNow = async () => {
@@ -375,9 +513,13 @@ function EditorPage() {
       const timedChunks = ranges.map((range, i) => ({ ...range, text: res.texts[i] ?? "" }));
       const timings = alignChunks(timedChunks, silences, audio.duration);
       setNarration(timings.map((t) => t.text).join(" "));
-      await persist(
-        scenesFromTimings(comp, timings, comp.mode === "edit" ? comp.duration : undefined),
+      const next = scenesFromTimings(
+        comp,
+        timings,
+        comp.mode === "edit" ? comp.duration : undefined,
       );
+      next.narration = timings.map((t) => t.text).join(" ");
+      await persist(next);
       markProjectUsed(comp.id);
       toast.success(`Transkrip: ${timings.length} kalimat.`);
     } catch {
@@ -435,13 +577,19 @@ function EditorPage() {
       start: scene.start,
       end: scene.end,
     });
-    const scenes = comp.scenes.map((s, i) => (i === index ? { ...generic, id: s.id } : s));
+    const scenes = comp.scenes.map((s, i) =>
+      i === index ? { ...generic, id: s.id, timedWords: s.timedWords } : s,
+    );
     await persist({ ...comp, scenes, updatedAt: Date.now() });
   };
 
   const updateSceneText = async (index: number, text: string) => {
-    const scenes = comp.scenes.map((s, i) => (i === index ? { ...s, text } : s));
-    await persist({ ...comp, scenes, updatedAt: Date.now() });
+    const scenes = comp.scenes.map((s, i) =>
+      i === index ? { ...s, text, timedWords: undefined } : s,
+    );
+    const nextNarration = scenes.map((scene) => scene.text).join(" ");
+    setNarration(nextNarration);
+    await persist({ ...comp, scenes, narration: nextNarration, updatedAt: Date.now() });
   };
 
   const changeAspect = async (aspect: Aspect) => {
@@ -630,7 +778,12 @@ function EditorPage() {
             >
               <Upload className="size-4" /> {audioRec ? audioRec.name : "Upload MP3/WAV"}
             </Button>
-            {audioUrl && <audio src={audioUrl} controls className="mt-3 w-full" />}
+            {audioUrl && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Audio siap. Gunakan kontrol preview sinkron di panel kanan untuk memutar dan
+                menandai waktu.
+              </p>
+            )}
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
@@ -725,11 +878,34 @@ function EditorPage() {
                 <Sparkles className="size-4" />{" "}
                 {busy === "plan" ? "Merancang…" : "Rancang adegan (AI)"}
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="font-semibold"
+                onClick={() => setAlignmentConsentOpen(true)}
+                disabled={busy !== null || !alignmentAvailable}
+                title={
+                  alignmentAvailable
+                    ? "Sejajarkan naskah ke audio dengan timestamp kata aktual"
+                    : "Provider alignment belum dikonfigurasi admin"
+                }
+              >
+                <Sparkles className="size-4" />{" "}
+                {busy === "align" ? "Menyelaraskan…" : "Sinkron presisi"}
+              </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              "Sinkron waktu" memecah kalimat & menyelaraskan dari jeda audio (lokal). "Rancang
-              adegan" memakai AI.
+              "Sinkron waktu" hanya memperkirakan batas dari teks dan jeda. "Sinkron presisi"
+              memakai timestamp kata dari audio. Putar preview di kanan, lalu gunakan "Tandai mulai"
+              pada scene untuk mengoreksi batas secara manual tanpa mengirim audio ke provider.
             </p>
+            {!alignmentAvailable && (
+              <p className="mt-2 rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
+                Sinkron presisi belum tersedia di server ini. Admin perlu mengatur secret
+                <code className="mx-1 rounded bg-background px-1">ELEVENLABS_API_KEY</code>. Penanda
+                manual tetap tersedia.
+              </p>
+            )}
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
@@ -837,6 +1013,7 @@ function EditorPage() {
               comp={comp}
               audioUrl={audioUrl}
               videoUrl={videoUrl}
+              onTimeChange={setPlayhead}
               assets={
                 bgBitmap ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height } : {}
               }
@@ -864,10 +1041,22 @@ function EditorPage() {
                         {scene.layout}
                         {scene.items?.length ? ` · ${scene.items.length} item` : ""}
                       </span>
+                      {i > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto shrink-0"
+                          disabled={busy !== null || (!audioUrl && !videoUrl)}
+                          onClick={() => void markSceneStart(i)}
+                          title={`Gunakan posisi preview ${playhead.toFixed(2)} detik sebagai awal scene`}
+                        >
+                          <BookmarkPlus className="size-3.5" /> Tandai mulai
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="ml-auto"
+                        className={i > 0 ? "shrink-0" : "ml-auto"}
                         onClick={() => void regenerateScene(i)}
                       >
                         <RefreshCcw className="size-3.5" /> Generik
@@ -886,6 +1075,31 @@ function EditorPage() {
           </section>
         </div>
       </main>
+      <Dialog open={alignmentConsentOpen} onOpenChange={setAlignmentConsentOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sinkron presisi dengan forced alignment</DialogTitle>
+            <DialogDescription>
+              Untuk menghitung waktu tiap kata, WAV mono dan teks narasi akan dikirim dari server ke
+              ElevenLabs. Pemrosesan memakai kredit/ketentuan akun provider dan tunduk pada
+              kebijakan retensi data mereka. Jangan lanjutkan untuk audio rahasia atau tanpa izin
+              pemiliknya. Rendering video tetap berlangsung di browser.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAlignmentConsentOpen(false)}
+              disabled={busy !== null}
+            >
+              Batal
+            </Button>
+            <Button onClick={() => void alignPrecisely()} disabled={busy !== null}>
+              {busy === "align" ? "Menyelaraskan…" : "Setuju, kirim dan sinkronkan"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -19,7 +19,7 @@ Input:
 Output dan proses:
 
 - Kalimat dipecah menjadi beberapa scene.
-- Timing diselaraskan dengan durasi audio dan jeda bicara.
+- Dengan forced alignment, setiap kata dan batas scene memakai timestamp audio aktual. Tanpa provider itu, editor memberi estimasi dari teks/jeda dan menyediakan penanda batas manual.
 - AI memilih layout yang relevan untuk setiap kalimat.
 - Subtitle dianimasikan kata demi kata.
 - Warna, font, background, partikel, ikon, dan stiker mengikuti topik narasi.
@@ -56,10 +56,17 @@ Browser pengguna
 └── Server Functions
     ├── Verifikasi kode akses
     ├── AI Creative Director via Kie.ai
-    └── Transkripsi audio via AI Gateway
+    ├── Transkripsi audio via AI Gateway
+    └── Forced alignment opsional via ElevenLabs (hanya setelah persetujuan pengguna)
 ```
 
-Dengan pendekatan ini, file media dan proses render tetap berada di device pengguna. Server hanya menangani panggilan AI yang diperlukan.
+Dengan pendekatan ini, file media dan proses render tetap berada di device pengguna. Forced alignment merupakan pengecualian opt-in: WAV mono dan naskah dikirim dari server ke ElevenLabs hanya sesudah pengguna menyetujui dialognya. Jika fitur tidak dikonfigurasi atau pengguna menolak, penanda manual tetap bekerja tanpa mengirim media ke provider.
+
+### Sinkronisasi naskah dan audio
+
+Sinkron waktu lokal hanyalah estimasi; jeda audio tidak selalu jatuh di batas kalimat. Untuk timestamp kata presisi, admin dapat menambahkan secret server `ELEVENLABS_API_KEY`. API forced alignment ElevenLabs mendukung bahasa Indonesia. Setiap kali fitur dijalankan, aplikasi menampilkan persetujuan karena audio/naskah akan diproses provider dan pemakaian dapat menghabiskan kredit akun ElevenLabs. Rendering tetap lokal. Pengguna juga dapat memutar preview dan menekan **Tandai mulai** pada scene yang sedang terdengar; koreksi manual tidak mengirim audio keluar.
+
+Jika forced alignment menghasilkan kata yang berbeda dari naskah, hasil ditolak daripada menerapkan timestamp yang dapat menggeser subtitle. Periksa ejaan naskah atau gunakan penanda manual.
 
 ## Teknologi
 
@@ -99,10 +106,10 @@ Tema, warna, font, background prosedural, partikel, ikon, dan stiker tidak di-ha
 
 Auto Remotion Studio tidak menggunakan sistem login atau database pengguna. Saat aktivasi, server memvalidasi API key Kie.ai dan memastikan saldo kredit masih tersedia; prefiks kode menentukan paket.
 
-| Paket | Harga promo | Kuota | Durasi maksimal | Fitur utama |
-| --- | ---: | ---: | ---: | --- |
-| Starter | Rp20.000 | 30 video | 90 detik | Motion Explainer dan render MP4 lokal |
-| Pro Creator | Rp49.000 | 100 video | 120 detik | Semua fitur Starter, Mode Edit Video, dan export Remotion ZIP |
+| Paket       | Harga promo |     Kuota | Durasi maksimal | Fitur utama                                                   |
+| ----------- | ----------: | --------: | --------------: | ------------------------------------------------------------- |
+| Starter     |    Rp20.000 |  30 video |        90 detik | Motion Explainer dan render MP4 lokal                         |
+| Pro Creator |    Rp49.000 | 100 video |       120 detik | Semua fitur Starter, Mode Edit Video, dan export Remotion ZIP |
 
 Harga coret promo:
 
@@ -134,7 +141,8 @@ src/
 │   └── PreviewPlayer.tsx       # Preview canvas dengan audio sinkron
 ├── routes/
 │   ├── index.tsx               # Landing page, mode, pricing, kode akses
-│   └── project.$id.tsx         # Editor project dan alur render
+│   ├── project.$id.tsx         # Editor project dan alur render
+│   └── api.align.ts            # Proxy forced alignment opsional, key server-only
 ├── lib/
 │   ├── access/
 │   │   ├── plans.ts            # Paket, kuota, dan access gate
@@ -154,7 +162,7 @@ src/
 │   │   ├── planner.ts           # Scene generik dan penerapan desain AI
 │   │   ├── renderer.ts          # Renderer frame utama
 │   │   ├── themes.ts            # Preset tema dan font
-│   │   ├── timing.ts             # Timing kalimat dan jeda audio
+│   │   ├── timing.ts             # Timing kalimat, jeda audio, dan word alignment
 │   │   └── types.ts              # Model Composition dan Scene
 │   ├── export/
 │   │   └── remotion-zip.ts      # Generator source project Remotion
