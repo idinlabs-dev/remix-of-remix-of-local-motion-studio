@@ -13,13 +13,13 @@ Mode ini ditujukan untuk video narasi tanpa pembicara di layar.
 Input:
 
 - Audio narasi.
-- Teks naskah, baik ditempel manual maupun hasil transkrip otomatis.
+- Teks naskah yang ditempel manual, sama dengan audio narasi.
 - Gambar background opsional.
 
 Output dan proses:
 
 - Kalimat dipecah menjadi beberapa scene.
-- Dengan forced alignment, setiap kata dan batas scene memakai timestamp audio aktual. Tanpa provider itu, editor memberi estimasi dari teks/jeda dan menyediakan penanda batas manual.
+- Sinkron waktu berjalan lokal: panjang teks dan jeda audio dipakai untuk memperkirakan batas scene. Penanda manual di preview digunakan untuk mengoreksi awal scene.
 - AI memilih layout yang relevan untuk setiap kalimat.
 - Subtitle dianimasikan kata demi kata.
 - Warna, font, background, partikel, ikon, dan stiker mengikuti topik narasi.
@@ -55,18 +55,14 @@ Browser pengguna
 │   └── Encode video dan mux audio
 └── Server Functions
     ├── Verifikasi kode akses
-    ├── AI Creative Director via Kie.ai
-    ├── Transkripsi audio via AI Gateway
-    └── Forced alignment opsional via ElevenLabs (hanya setelah persetujuan pengguna)
+    └── AI Creative Director via Kie.ai (opsional, untuk desain visual)
 ```
 
-Dengan pendekatan ini, file media dan proses render tetap berada di device pengguna. Forced alignment merupakan pengecualian opt-in: WAV mono dan naskah dikirim dari server ke ElevenLabs hanya sesudah pengguna menyetujui dialognya. Jika fitur tidak dikonfigurasi atau pengguna menolak, penanda manual tetap bekerja tanpa mengirim media ke provider.
+File media, deteksi jeda, sinkron waktu, dan proses render tetap berada di device pengguna. Sinkron waktu tidak membuat transkrip dan tidak mengirim audio ke server atau layanan lain. Teks narasi disediakan pengguna; Kie.ai hanya dipanggil jika pengguna memilih desain visual AI.
 
 ### Sinkronisasi naskah dan audio
 
-Sinkron waktu lokal hanyalah estimasi; jeda audio tidak selalu jatuh di batas kalimat. Untuk timestamp kata presisi, admin dapat menambahkan secret server `ELEVENLABS_API_KEY`. API forced alignment ElevenLabs mendukung bahasa Indonesia. Setiap kali fitur dijalankan, aplikasi menampilkan persetujuan karena audio/naskah akan diproses provider dan pemakaian dapat menghabiskan kredit akun ElevenLabs. Rendering tetap lokal. Pengguna juga dapat memutar preview dan menekan **Tandai mulai** pada scene yang sedang terdengar; koreksi manual tidak mengirim audio keluar.
-
-Jika forced alignment menghasilkan kata yang berbeda dari naskah, hasil ditolak daripada menerapkan timestamp yang dapat menggeser subtitle. Periksa ejaan naskah atau gunakan penanda manual.
+Klik **Sinkron waktu** untuk membuat batas scene awal berdasarkan estimasi teks dan jeda yang terdeteksi lokal. Untuk mencocokkan pergantian visual dengan ucapan secara tepat, putar preview dan tekan **Tandai mulai** pada scene ketika kalimatnya mulai terdengar. Audio dan teks tidak dikirim keluar untuk proses ini. Subtitle kata-per-kata memakai estimasi lokal di dalam rentang scene.
 
 ## Teknologi
 
@@ -82,7 +78,6 @@ Jika forced alignment menghasilkan kata yang berbeda dari naskah, hasil ditolak 
 - IndexedDB untuk project dan media lokal.
 - `localStorage` untuk kode akses, kuota, dan preferensi ringan.
 - Claude Haiku 5.5 melalui endpoint Kie.ai untuk desain scene.
-- AI Gateway untuk transkripsi audio.
 - Vitest untuk pengujian otomatis.
 
 ## Mesin Visual
@@ -142,7 +137,6 @@ src/
 ├── routes/
 │   ├── index.tsx               # Landing page, mode, pricing, kode akses
 │   ├── project.$id.tsx         # Editor project dan alur render
-│   └── api.align.ts            # Proxy forced alignment opsional, key server-only
 ├── lib/
 │   ├── access/
 │   │   ├── plans.ts            # Paket, kuota, dan access gate
@@ -152,17 +146,15 @@ src/
 │   │   ├── ai.functions.ts     # Server functions AI
 │   │   ├── kie.server.ts       # Client server Kie.ai
 │   │   ├── schema.ts           # Schema Zod dan prompt Creative Director
-│   │   └── transcribe.server.ts# Transkripsi audio
 │   ├── encode/
 │   │   ├── exporter.ts          # Render Canvas dan encode WebCodecs
-│   │   └── wav.ts               # Resample dan potong audio transkripsi
 │   ├── engine/
 │   │   ├── background.ts        # Background prosedural dan partikel
 │   │   ├── layouts.ts           # Renderer layout infografis
 │   │   ├── planner.ts           # Scene generik dan penerapan desain AI
 │   │   ├── renderer.ts          # Renderer frame utama
 │   │   ├── themes.ts            # Preset tema dan font
-│   │   ├── timing.ts             # Timing kalimat, jeda audio, dan word alignment
+│   │   ├── timing.ts             # Timing kalimat, estimasi lokal, dan jeda audio
 │   │   └── types.ts              # Model Composition dan Scene
 │   ├── export/
 │   │   └── remotion-zip.ts      # Generator source project Remotion
@@ -219,17 +211,9 @@ Contoh konfigurasi:
 ```env
 # Origin publik deployment; dipakai untuk canonical dan Open Graph URL.
 VITE_SITE_URL=https://domain-anda.example
-
-# Model AI untuk deployment yang memakai provider Gemini lama/kompatibel.
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.8-flash
-
-# Kunci berikut digunakan oleh alur server yang aktif dan disediakan
-# melalui secret manager deployment, bukan dikirim ke browser.
-LOVABLE_API_KEY=
 ```
 
-Kunci API tidak boleh diletakkan di komponen React atau dikirim sebagai environment variable client-side. Server function bertanggung jawab meneruskan request ke provider AI.
+Sinkron waktu dan render tidak memerlukan API key tambahan. Jika pengguna memilih **Rancang adegan (AI)**, request desain visual memakai Kie.ai key yang sudah ada di Kode Akses.
 
 ## Perintah Development
 
@@ -249,7 +233,7 @@ Yang sudah tersedia:
 - Model Composition, Scene, Theme, dan timeline.
 - Planner generik berbasis heuristik.
 - AI Creative Director server function via Kie.ai.
-- Transkripsi audio per chunk.
+- Sinkron waktu lokal dari teks dan jeda audio, dengan koreksi batas scene lewat playhead.
 - Renderer Canvas dengan layout universal.
 - Preview audio dan canvas.
 - Export MP4/WebM melalui Mediabunny dan WebCodecs.

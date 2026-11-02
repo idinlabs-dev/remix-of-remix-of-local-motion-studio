@@ -12,16 +12,6 @@ export interface TimedSentence {
   end: number;
 }
 
-export interface AlignedWord {
-  text: string;
-  start: number;
-  end: number;
-}
-
-export interface AlignedSentence extends TimedSentence {
-  words: { word: string; start: number; end: number }[];
-}
-
 /** Pecah teks narasi jadi kalimat, menyatukan potongan terlalu pendek. */
 export function splitSentences(text: string): string[] {
   const cleaned = text.replace(/\s+/g, " ").trim();
@@ -150,23 +140,8 @@ export function buildTimings(
   return timings;
 }
 
-/** Susun timeline dari transkrip ber-waktu (hasil AI). */
-export function buildFromTranscript(
-  items: { text: string; start: number; end: number }[],
-  duration: number,
-): TimedSentence[] {
-  if (items.length === 0) return [];
-  const sorted = [...items].sort((a, b) => a.start - b.start);
-  const out: TimedSentence[] = sorted.map((it, i) => ({
-    text: it.text,
-    start: it.start,
-    end: i === sorted.length - 1 ? Math.max(it.end, duration) : it.end,
-  }));
-  return out;
-}
-
 /**
- * Waktu mulai tiap kata di dalam kalimat — proporsional panjang karakter.
+ * Estimasi waktu tiap kata di dalam kalimat — proporsional panjang karakter.
  * Dipakai subtitle sorot kata-per-kata; deterministik.
  */
 export function wordTimings(
@@ -185,128 +160,4 @@ export function wordTimings(
     cursor += span;
     return t;
   });
-}
-
-/**
- * Potong audio panjang jadi beberapa bagian (untuk transkrip per bagian) —
- * batas dipilih di tengah jeda terdekat dari target panjang.
- */
-export function chunkRanges(
-  silences: Silence[],
-  duration: number,
-  target = 12,
-  maxLen = 20,
-): { start: number; end: number }[] {
-  if (duration <= 0) return [];
-  const mids = silences
-    .map((s) => (s.start + s.end) / 2)
-    .filter((m) => m > 0.5 && m < duration - 0.5)
-    .sort((a, b) => a - b);
-  const out: { start: number; end: number }[] = [];
-  let start = 0;
-  while (duration - start > maxLen) {
-    const ideal = start + target;
-    const cands = mids.filter((m) => m > start + target * 0.5 && m <= start + maxLen);
-    let cut = ideal;
-    for (const m of cands)
-      if (Math.abs(m - ideal) < Math.abs(cut - ideal) || cut === ideal) cut = m;
-    out.push({ start, end: cut });
-    start = cut;
-  }
-  out.push({ start, end: duration });
-  return out;
-}
-
-/**
- * Gabungkan transkrip per bagian jadi kalimat ber-waktu: tiap bagian punya
- * waktu pasti, di dalamnya kalimat diselaraskan ke jeda audio.
- */
-export function alignChunks(
-  chunks: { start: number; end: number; text: string }[],
-  silences: Silence[],
-  duration: number,
-): TimedSentence[] {
-  const out: TimedSentence[] = [];
-  for (const c of chunks) {
-    const sentences = splitSentences(c.text);
-    if (sentences.length === 0) {
-      const prev = out[out.length - 1];
-      if (prev) prev.end = c.end;
-      continue;
-    }
-    const len = c.end - c.start;
-    const local = silences
-      .filter((s) => s.start >= c.start && s.end <= c.end)
-      .map((s) => ({ start: s.start - c.start, end: s.end - c.start }));
-    for (const t of buildTimings(sentences, local, len)) {
-      out.push({ text: t.text, start: t.start + c.start, end: t.end + c.start });
-    }
-  }
-  const first = out[0];
-  if (first) first.start = 0;
-  const last = out[out.length - 1];
-  if (last) last.end = Math.max(last.end, duration);
-  return out;
-}
-
-function normalizeToken(text: string): string {
-  return text
-    .toLocaleLowerCase()
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}]/gu, "");
-}
-
-/** Cocokkan waktu kata dari forced aligner ke skrip; menolak mismatch agar tidak diam-diam drift. */
-export function alignScriptToWords(
-  sentences: string[],
-  aligned: AlignedWord[],
-  duration: number,
-): AlignedSentence[] | null {
-  if (!sentences.length || !aligned.length || !Number.isFinite(duration) || duration <= 0)
-    return null;
-  const scriptWords = sentences.flatMap((sentence) => sentence.trim().split(/\s+/).filter(Boolean));
-  if (scriptWords.length !== aligned.length) return null;
-  for (let i = 0; i < scriptWords.length; i++) {
-    const word = aligned[i];
-    if (!word || normalizeToken(scriptWords[i] ?? "") !== normalizeToken(word.text)) return null;
-    if (
-      !Number.isFinite(word.start) ||
-      !Number.isFinite(word.end) ||
-      word.start < 0 ||
-      word.end <= word.start ||
-      word.start > duration
-    )
-      return null;
-    if (i > 0 && word.start < (aligned[i - 1]?.start ?? 0)) return null;
-  }
-
-  const grouped: { word: string; start: number; end: number }[][] = [];
-  let cursor = 0;
-  for (const sentence of sentences) {
-    const group: { word: string; start: number; end: number }[] = [];
-    for (const word of sentence.trim().split(/\s+/).filter(Boolean)) {
-      const span = aligned[cursor++];
-      if (!span) return null;
-      group.push({ word, start: Math.max(0, span.start), end: Math.min(duration, span.end) });
-    }
-    grouped.push(group);
-  }
-
-  const boundaries = grouped.slice(0, -1).map((group, i) => {
-    const last = group.at(-1);
-    const first = grouped[i + 1]?.[0];
-    if (!last || !first) return last?.end ?? 0;
-    return Math.max(last.end, Math.min(first.start, (last.end + first.start) / 2));
-  });
-  const out: AlignedSentence[] = [];
-  let start = 0;
-  for (let i = 0; i < sentences.length; i++) {
-    const words = grouped[i] ?? [];
-    const end = i < boundaries.length ? (boundaries[i] ?? duration) : duration;
-    if (end <= start || words.some((word) => word.start < start - 0.1 || word.end > end + 0.1))
-      return null;
-    out.push({ text: sentences[i] ?? "", start, end, words });
-    start = end;
-  }
-  return out;
 }

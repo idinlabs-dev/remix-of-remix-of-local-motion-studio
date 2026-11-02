@@ -14,36 +14,23 @@ import {
   Trash2,
   Upload,
   Video,
-  Wand2,
 } from "lucide-react";
 
 import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { designScenes, transcribeChunks } from "@/lib/ai/ai.functions";
-import type { DesignResponse, TranscribeResponse } from "@/lib/ai/schema";
+import { designScenes } from "@/lib/ai/ai.functions";
+import type { DesignResponse } from "@/lib/ai/schema";
 import { checkAiGate, checkRenderGate } from "@/lib/access/plans";
 import { markProjectUsed, useAccess } from "@/lib/access/store";
 import { applyDesign, scenesFromTimings, genericScene } from "@/lib/engine/planner";
 import {
-  alignChunks,
-  alignScriptToWords,
   buildTimings,
-  chunkRanges,
   computeSilences,
   splitSentences,
   type TimedSentence,
 } from "@/lib/engine/timing";
-import type { AlignedWord } from "@/lib/engine/timing";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
 import {
   decodeAudio,
@@ -52,7 +39,6 @@ import {
   type RenderProgress,
 } from "@/lib/encode/exporter";
 import { buildRemotionZip } from "@/lib/export/remotion-zip";
-import { encodeWav, toMono16k, wavChunksBase64 } from "@/lib/encode/wav";
 import {
   getMedia,
   getProject,
@@ -86,10 +72,6 @@ export const Route = createFileRoute("/project/$id")({
   }),
   component: EditorPage,
 });
-
-const MAX_TRANSCRIBE_BYTES = 18 * 1024 * 1024;
-type AlignmentApiResponse =
-  { ok: true; words: AlignedWord[]; loss?: number | null } | { ok: false; message: string };
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -127,8 +109,6 @@ function EditorPage() {
   const [progress, setProgress] = useState<RenderProgress | null>(null);
   const [renders, setRenders] = useState<RenderRecord[]>([]);
   const [renderUrls, setRenderUrls] = useState<Record<string, string>>({});
-  const [alignmentAvailable, setAlignmentAvailable] = useState(false);
-  const [alignmentConsentOpen, setAlignmentConsentOpen] = useState(false);
   const [playhead, setPlayhead] = useState(0);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -136,17 +116,6 @@ function EditorPage() {
   const videoInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/align", { headers: { Accept: "application/json" } })
-      .then((res) => res.json() as Promise<{ available?: boolean }>)
-      .then((data) => !cancelled && setAlignmentAvailable(data.available === true))
-      .catch(() => !cancelled && setAlignmentAvailable(false));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // ---- muat project & media ----
   useEffect(() => {
@@ -357,93 +326,6 @@ function EditorPage() {
     toast.success(`${timings.length} adegan tersusun.`);
   };
 
-  const alignPrecisely = async () => {
-    if (!narration.trim()) {
-      toast.error("Tulis teks narasi dulu agar dapat disejajarkan dengan audio.");
-      return;
-    }
-    if (!audioRec && !videoRec) {
-      toast.error("Upload audio atau footage dengan track audio dulu.");
-      return;
-    }
-    if (!access) {
-      toast.error("Masukkan Kode Akses dulu.");
-      return;
-    }
-    let audio: AudioBuffer | null;
-    try {
-      audio =
-        decoded ??
-        (audioRec ? await decodeAudio(audioRec.blob) : await decodeVideoAudio(videoRec!.blob));
-    } catch {
-      toast.error("Audio tidak dapat dibaca. Coba WAV, MP3, atau MP4/WebM dengan codec umum.");
-      return;
-    }
-    if (!audio) {
-      toast.error("Tidak menemukan track audio yang bisa disejajarkan.");
-      return;
-    }
-    const gate = checkAiGate(access, {
-      projectId: comp.id,
-      durationSec: audio.duration,
-      mode: comp.mode,
-    });
-    if (!gate.ok) {
-      toast.error(gate.message);
-      return;
-    }
-    const sentences = splitSentences(narration);
-    if (!sentences.length) {
-      toast.error("Teks narasi belum berisi kalimat yang dapat disejajarkan.");
-      return;
-    }
-    setBusy("align");
-    try {
-      if (!decoded) setDecoded(audio);
-      const mono16k = await toMono16k(audio);
-      const wav = encodeWav(mono16k, 16_000);
-      if (wav.byteLength > 4_250_000) {
-        toast.error(
-          "Audio hasil konversi melewati batas upload. Pendekkan audio atau gunakan penanda manual.",
-        );
-        return;
-      }
-      const form = new FormData();
-      form.append("code", access.code);
-      form.append("text", narration.trim());
-      form.append("file", new Blob([wav as BlobPart], { type: "audio/wav" }), "narration.wav");
-      const response = await fetch("/api/align", { method: "POST", body: form });
-      const result = (await response.json()) as AlignmentApiResponse;
-      if (!response.ok || !result.ok) {
-        toast.error(result.ok ? "Sinkronisasi gagal." : result.message);
-        return;
-      }
-      const aligned = alignScriptToWords(sentences, result.words, audio.duration);
-      if (!aligned) {
-        toast.error(
-          "Kata hasil alignment tidak cocok persis dengan naskah. Periksa naskah/audio, lalu coba penanda manual.",
-        );
-        return;
-      }
-      const timed = scenesFromTimings(
-        comp,
-        aligned,
-        comp.mode === "edit" ? comp.duration : undefined,
-      );
-      timed.scenes = timed.scenes.map((scene, i) => ({ ...scene, timedWords: aligned[i]?.words }));
-      timed.narration = narration;
-      timed.updatedAt = Date.now();
-      await persist(timed);
-      markProjectUsed(comp.id);
-      setAlignmentConsentOpen(false);
-      toast.success(`Sinkron presisi selesai: ${aligned.length} adegan dan timestamp kata aktual.`);
-    } catch {
-      toast.error("Sinkron presisi gagal. Coba lagi atau gunakan penanda manual.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const markSceneStart = async (index: number) => {
     if (index <= 0) {
       toast.info("Adegan pertama selalu mulai dari 0 detik.");
@@ -466,67 +348,6 @@ function EditorPage() {
     });
     await persist({ ...comp, scenes, updatedAt: Date.now() });
     toast.success(`Batas adegan #${index + 1} dipindah ke ${boundary.toFixed(2)} dtk.`);
-  };
-
-  const transcribeNow = async () => {
-    if (!audioRec && !videoRec) {
-      toast.error("Upload audio atau footage dengan track audio untuk transkrip otomatis.");
-      return;
-    }
-    const gate = checkAiGate(access, {
-      projectId: comp.id,
-      durationSec: decoded?.duration ?? comp.duration,
-      mode: comp.mode,
-    });
-    if (!gate.ok) {
-      toast.error(gate.message);
-      return;
-    }
-    if (!access) return;
-    if (audioRec && audioRec.blob.size > MAX_TRANSCRIBE_BYTES) {
-      toast.error(
-        "Audio terlalu besar untuk transkrip (maks 18 MB). Potong dulu atau tempel teks manual.",
-      );
-      return;
-    }
-    setBusy("transcribe");
-    try {
-      const audio =
-        decoded ??
-        (audioRec ? await decodeAudio(audioRec.blob) : await decodeVideoAudio(videoRec!.blob));
-      if (!audio) {
-        toast.error("Footage tidak memiliki track audio yang bisa dibaca.");
-        return;
-      }
-      if (!decoded) setDecoded(audio);
-      const silences = computeSilences(audio.getChannelData(0), audio.sampleRate);
-      const ranges = chunkRanges(silences, audio.duration);
-      const mono16k = await toMono16k(audio);
-      const chunks = wavChunksBase64(mono16k, ranges);
-      const res: TranscribeResponse = await transcribeChunks({
-        data: { code: access.code, chunks },
-      });
-      if (!res.ok) {
-        toast.error("Transkrip gagal: " + res.message);
-        return;
-      }
-      const timedChunks = ranges.map((range, i) => ({ ...range, text: res.texts[i] ?? "" }));
-      const timings = alignChunks(timedChunks, silences, audio.duration);
-      setNarration(timings.map((t) => t.text).join(" "));
-      const next = scenesFromTimings(
-        comp,
-        timings,
-        comp.mode === "edit" ? comp.duration : undefined,
-      );
-      next.narration = timings.map((t) => t.text).join(" ");
-      await persist(next);
-      markProjectUsed(comp.id);
-      toast.success(`Transkrip: ${timings.length} kalimat.`);
-    } catch {
-      toast.error("Transkrip gagal — coba lagi.");
-    } finally {
-      setBusy(null);
-    }
   };
 
   const planWithAi = async () => {
@@ -578,14 +399,14 @@ function EditorPage() {
       end: scene.end,
     });
     const scenes = comp.scenes.map((s, i) =>
-      i === index ? { ...generic, id: s.id, timedWords: s.timedWords } : s,
+      i === index ? { ...generic, id: s.id } : s,
     );
     await persist({ ...comp, scenes, updatedAt: Date.now() });
   };
 
   const updateSceneText = async (index: number, text: string) => {
     const scenes = comp.scenes.map((s, i) =>
-      i === index ? { ...s, text, timedWords: undefined } : s,
+      i === index ? { ...s, text } : s,
     );
     const nextNarration = scenes.map((scene) => scene.text).join(" ");
     setNarration(nextNarration);
@@ -846,20 +667,10 @@ function EditorPage() {
               value={narration}
               onChange={(e) => setNarration(e.target.value)}
               rows={6}
-              placeholder="Tempel teks narasi di sini, atau pakai transkrip otomatis…"
+              placeholder="Tempel naskah yang sama dengan audio narasi di sini…"
               className="resize-y"
             />
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="font-semibold"
-                onClick={() => void transcribeNow()}
-                disabled={busy !== null || (!audioRec && !videoRec)}
-              >
-                <Wand2 className="size-4" />{" "}
-                {busy === "transcribe" ? "Mentranskrip…" : "Auto-transkrip (AI)"}
-              </Button>
               <Button
                 size="sm"
                 className="font-semibold"
@@ -878,34 +689,12 @@ function EditorPage() {
                 <Sparkles className="size-4" />{" "}
                 {busy === "plan" ? "Merancang…" : "Rancang adegan (AI)"}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="font-semibold"
-                onClick={() => setAlignmentConsentOpen(true)}
-                disabled={busy !== null || !alignmentAvailable}
-                title={
-                  alignmentAvailable
-                    ? "Sejajarkan naskah ke audio dengan timestamp kata aktual"
-                    : "Provider alignment belum dikonfigurasi admin"
-                }
-              >
-                <Sparkles className="size-4" />{" "}
-                {busy === "align" ? "Menyelaraskan…" : "Sinkron presisi"}
-              </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              "Sinkron waktu" hanya memperkirakan batas dari teks dan jeda. "Sinkron presisi"
-              memakai timestamp kata dari audio. Putar preview di kanan, lalu gunakan "Tandai mulai"
-              pada scene untuk mengoreksi batas secara manual tanpa mengirim audio ke provider.
+              "Sinkron waktu" menyusun scene secara lokal dari naskah dan jeda audio. Untuk
+              mencocokkan pergantian visual dengan ucapan, putar preview lalu tekan "Tandai mulai"
+              pada scene di awal kalimat yang sesuai.
             </p>
-            {!alignmentAvailable && (
-              <p className="mt-2 rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
-                Sinkron presisi belum tersedia di server ini. Admin perlu mengatur secret
-                <code className="mx-1 rounded bg-background px-1">ELEVENLABS_API_KEY</code>. Penanda
-                manual tetap tersedia.
-              </p>
-            )}
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
@@ -1075,31 +864,6 @@ function EditorPage() {
           </section>
         </div>
       </main>
-      <Dialog open={alignmentConsentOpen} onOpenChange={setAlignmentConsentOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Sinkron presisi dengan forced alignment</DialogTitle>
-            <DialogDescription>
-              Untuk menghitung waktu tiap kata, WAV mono dan teks narasi akan dikirim dari server ke
-              ElevenLabs. Pemrosesan memakai kredit/ketentuan akun provider dan tunduk pada
-              kebijakan retensi data mereka. Jangan lanjutkan untuk audio rahasia atau tanpa izin
-              pemiliknya. Rendering video tetap berlangsung di browser.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setAlignmentConsentOpen(false)}
-              disabled={busy !== null}
-            >
-              Batal
-            </Button>
-            <Button onClick={() => void alignPrecisely()} disabled={busy !== null}>
-              {busy === "align" ? "Menyelaraskan…" : "Setuju, kirim dan sinkronkan"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

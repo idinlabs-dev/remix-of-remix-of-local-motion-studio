@@ -86,9 +86,6 @@ export type AiFailReason = "no-access" | "no-credit" | "api-error" | "parse-erro
 export type DesignResponse =
   { ok: true; plan: DesignPlan } | { ok: false; reason: AiFailReason; message: string };
 
-export type TranscribeResponse =
-  { ok: true; texts: string[] } | { ok: false; reason: AiFailReason; message: string };
-
 export type VerifyResponse =
   { ok: true; plan: "starter" | "pro" } | { ok: false; reason: AiFailReason; message: string };
 

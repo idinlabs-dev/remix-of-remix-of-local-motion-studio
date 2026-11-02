@@ -78,12 +78,6 @@ export interface SceneItem {
   icon?: string | undefined;
 }
 
-export interface SceneTimedWord {
-  word: string;
-  start: number;
-  end: number;
-}
-
 /** Objek dekoratif (stiker/ikon animasi) supaya visual tidak membosankan. */
 export interface Sticker {
   icon: string;
@@ -109,8 +103,6 @@ export interface Scene {
   items?: SceneItem[] | undefined;
   /** Kata yang disorot warna aksen di subtitle. */
   keywords?: string[] | undefined;
-  /** Timestamp kata aktual hasil forced alignment, dalam detik absolut. */
-  timedWords?: SceneTimedWord[] | undefined;
   stickers?: Sticker[] | undefined;
   /** Mode edit: tampilan footage pembicara di adegan ini. */
   speaker?: SpeakerMode | undefined;
@@ -203,21 +195,6 @@ export function normalizeComposition(raw: unknown): Composition {
       icon: s["icon"] as string | undefined,
       items: Array.isArray(s["items"]) ? (s["items"] as SceneItem[]) : undefined,
       keywords: Array.isArray(s["keywords"]) ? (s["keywords"] as string[]) : undefined,
-      timedWords: Array.isArray(s["timedWords"])
-        ? (s["timedWords"] as Record<string, unknown>[])
-            .filter(
-              (w) =>
-                typeof w["word"] === "string" &&
-                Number.isFinite(w["start"]) &&
-                Number.isFinite(w["end"]) &&
-                Number(w["end"]) > Number(w["start"]),
-            )
-            .map((w) => ({
-              word: String(w["word"]),
-              start: Number(w["start"]),
-              end: Number(w["end"]),
-            }))
-        : undefined,
       stickers: Array.isArray(s["stickers"]) ? (s["stickers"] as Sticker[]) : undefined,
       speaker: s["speaker"] === undefined ? undefined : oneOf(SPEAKER_MODES, s["speaker"], "full"),
     };

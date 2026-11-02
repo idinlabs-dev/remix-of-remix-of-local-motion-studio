@@ -185,7 +185,6 @@ export function applyDesign(comp: Composition, plan: DesignPlan): Composition {
       start: scene.start,
       end: scene.end,
       text: scene.text,
-      timedWords: scene.timedWords,
       layout: comp.mode === "explainer" && d.layout === "speaker" ? "icon" : d.layout,
       transition: d.transition,
       headline: d.headline,

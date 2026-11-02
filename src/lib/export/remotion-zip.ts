@@ -218,18 +218,7 @@ const Subtitle: React.FC<{ scene: Scene; theme: any; mode: string; U: number }> 
   let acc = 0;
   const starts = weights.map((w) => { const s = (acc / total) * dur; acc += w; return s; });
   let active = 0;
-  if (Array.isArray(scene.timedWords) && scene.timedWords.length === words.length) {
-    const found = scene.timedWords.findIndex((w: any) => t >= w.start && t < w.end);
-    if (found >= 0) {
-      active = found;
-    } else {
-      const previous = scene.timedWords.reduce((last: number, w: any, i: number) => w.end <= t ? i : last, -1);
-      if (previous < 0) return null;
-      active = previous;
-    }
-  } else {
-    starts.forEach((s, i) => { if (t >= s) active = i; });
-  }
+  starts.forEach((s, i) => { if (t >= s) active = i; });
   if (mode === "edit") {
     const g = Math.floor(active / 4);
     return (<div style={{ position: "absolute", top: "76%", width: "100%", textAlign: "center", fontSize: U * 0.075, fontWeight: 900 }}>

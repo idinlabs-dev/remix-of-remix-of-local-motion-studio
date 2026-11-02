@@ -1,12 +1,10 @@
-// Server function tipis — satu-satunya jalur ke layanan AI.
-// - Rancang desain: Claude Haiku 5.5 via Kie.ai memakai Kode Akses user.
-// - Transkrip: Lovable AI Gateway, hanya untuk Kode Akses yang valid.
+// Server function tipis — verifikasi akses dan rancangan visual via Kie.ai.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { PLANS, parseAccessCode } from "@/lib/access/plans";
-import { DESIGN_TOOL, designPlanSchema, designPrompt, type DesignResponse, type TranscribeResponse, type VerifyResponse } from "./schema";
+import { DESIGN_TOOL, designPlanSchema, designPrompt, type DesignResponse, type VerifyResponse } from "./schema";
 
 const codeField = z.string().min(16).max(160);
 
@@ -69,53 +67,4 @@ export const designScenes = createServerFn({ method: "POST" })
       }
     }
     return { ok: false, reason: "parse-error", message: "Rancangan AI tidak valid — coba lagi atau pakai susunan otomatis." };
-  });
-
-/** ~32 KB per detik (WAV 16 kHz mono 16-bit). */
-const WAV_BYTES_PER_SEC = 32_000;
-
-export const transcribeChunks = createServerFn({ method: "POST" })
-  .inputValidator((data) =>
-    z
-      .object({
-        code: codeField,
-        chunks: z.array(z.string().min(100)).min(1).max(40),
-      })
-      .parse(data),
-  )
-  .handler(async ({ data }): Promise<TranscribeResponse> => {
-    const parsed = parseAccessCode(data.code);
-    if (!parsed) return { ok: false, reason: "no-access", message: "Kode akses tidak valid." };
-    const bytes = data.chunks.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-    const total = bytes.reduce((a, b) => a + b.length, 0);
-    const maxSec = PLANS[parsed.plan].maxSeconds + 5;
-    if (total > maxSec * WAV_BYTES_PER_SEC + 4096) {
-      return { ok: false, reason: "limit", message: `Audio melebihi batas paket (${PLANS[parsed.plan].maxSeconds} detik).` };
-    }
-    const { checkKieKey, KieError } = await import("./kie.server");
-    try {
-      await checkKieKey(parsed.key);
-    } catch (err) {
-      const status = err instanceof KieError ? err.status : 500;
-      return {
-        ok: false,
-        reason: status === 402 ? "no-credit" : "no-access",
-        message: (err as Error).message,
-      };
-    }
-    const apiKey = process.env["LOVABLE_API_KEY"];
-    if (!apiKey) return { ok: false, reason: "api-error", message: "Layanan transkrip belum dikonfigurasi." };
-    const { transcribeWav, TranscribeError } = await import("./transcribe.server");
-    try {
-      const texts: string[] = [];
-      for (const wav of bytes) texts.push(await transcribeWav(apiKey, wav));
-      return { ok: true, texts };
-    } catch (err) {
-      console.error("transcribeChunks failed:", err);
-      return {
-        ok: false,
-        reason: "api-error",
-        message: err instanceof TranscribeError ? err.message : "Transkrip gagal — coba lagi.",
-      };
-    }
   });

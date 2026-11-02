@@ -175,9 +175,7 @@ function isKeyword(word: string, keywords: string[] | undefined): boolean {
 }
 
 function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: number, U: number, theme: Theme, zone: number) {
-  const words = scene.timedWords?.length
-    ? scene.timedWords
-    : wordTimings(scene.text, scene.start, scene.end - scene.start);
+  const words = wordTimings(scene.text, scene.start, scene.end - scene.start);
   if (words.length === 0) return;
   const fontSize = Math.round(U * 0.046);
   ctx.save();
@@ -244,15 +242,10 @@ function drawSubtitle(ctx: Ctx2D, scene: Scene, time: number, W: number, H: numb
 
 /** Caption punchy ala reels: 3-4 kata per kelompok, kata aktif membesar. */
 function drawPunchCaption(ctx: Ctx2D, scene: Scene, time: number, W: number, H: number, U: number, theme: Theme) {
-  const words = scene.timedWords?.length
-    ? scene.timedWords
-    : wordTimings(scene.text, scene.start, scene.end - scene.start);
+  const words = wordTimings(scene.text, scene.start, scene.end - scene.start);
   if (words.length === 0) return;
-  const hasAlignedWords = Boolean(scene.timedWords?.length);
-  if (hasAlignedWords && time < (words[0]?.start ?? 0)) return;
   const idx = words.findIndex((wt) => time >= wt.start && time < wt.end);
-  const lastSpoken = words.reduce((last, wt, i) => (wt.end <= time ? i : last), -1);
-  const activeIdx = idx < 0 ? (lastSpoken < 0 ? 0 : lastSpoken) : idx;
+  const activeIdx = idx < 0 ? words.length - 1 : idx;
   const group = Math.floor(activeIdx / 4);
   const chunk = words.slice(group * 4, group * 4 + 4);
   const fontSize = Math.round(U * 0.075);
