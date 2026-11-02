@@ -115,7 +115,6 @@ function EditorPage() {
   const audioInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
   const srtInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -510,18 +509,6 @@ function EditorPage() {
     }
   };
 
-  const importTimeline = async (file: File) => {
-    try {
-      const parsed = JSON.parse(await file.text()) as Composition;
-      if (!parsed.scenes || typeof parsed.duration !== "number") throw new Error("bad");
-      await persist({ ...parsed, id: comp.id, updatedAt: Date.now() });
-      setNarration(parsed.narration ?? "");
-      toast.success("Timeline diimpor.");
-    } catch {
-      toast.error("File timeline tidak valid.");
-    }
-  };
-
   const importSrt = async (file: File) => {
     try {
       if (!file.name.toLowerCase().endsWith(".srt")) {
@@ -570,13 +557,6 @@ function EditorPage() {
         accept="video/mp4,video/webm,video/quicktime"
         className="hidden"
         onChange={(e) => e.target.files?.[0] && void onVideoFile(e.target.files[0])}
-      />
-      <input
-        ref={importInputRef}
-        type="file"
-        accept="application/json"
-        className="hidden"
-        onChange={(e) => e.target.files?.[0] && void importTimeline(e.target.files[0])}
       />
       <input
         ref={srtInputRef}
@@ -741,6 +721,10 @@ function EditorPage() {
               Tanpa SRT, "Sinkron waktu" memperkirakan batas dari naskah dan jeda audio. Untuk
               mengoreksi batas, putar preview lalu tekan "Tandai mulai".
             </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Privasi: audio tetap diproses lokal. Saat tombol AI ditekan, teks narasi dan durasi
+              adegan dikirim ke Kie.ai untuk merancang visual.
+            </p>
           </section>
 
           <section className="rounded-xl border-2 border-foreground/15 bg-card p-4">
@@ -783,24 +767,14 @@ function EditorPage() {
                 </Button>
               </div>
             )}
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 font-semibold"
-                onClick={exportTimeline}
-              >
-                <Download className="size-4" /> Ekspor timeline
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 font-semibold"
-                onClick={() => importInputRef.current?.click()}
-              >
-                <Upload className="size-4" /> Impor timeline
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 w-full font-semibold"
+              onClick={exportTimeline}
+            >
+              <Download className="size-4" /> Ekspor timeline
+            </Button>
             {access?.plan === "pro" && (
               <Button
                 variant="outline"
