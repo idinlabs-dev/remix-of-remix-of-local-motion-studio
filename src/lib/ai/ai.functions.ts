@@ -1,108 +1,117 @@
-// Server function tipis: satu-satunya jalur ke Gemini. Kunci API tidak pernah
-// masuk bundle browser — dibaca di dalam handler (server-only).
+// Server function tipis — satu-satunya jalur ke layanan AI.
+// - Rancang desain: Claude Haiku 5.5 via Kie.ai memakai Kode Akses user.
+// - Transkrip: Lovable AI Gateway, hanya untuk Kode Akses yang valid.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import {
-  scenePlanSchema,
-  TRANSCRIBE_PROMPT,
-  scenePlanPrompt,
-  transcriptSchema,
-  type PlanResponse,
-  type TranscribeResponse,
-} from "./schema";
+import { PLANS, parseAccessCode } from "@/lib/access/plans";
+import { DESIGN_TOOL, designPlanSchema, designPrompt, type DesignResponse, type TranscribeResponse, type VerifyResponse } from "./schema";
 
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const codeField = z.string().min(16).max(160);
 
-function model(): string {
-  return process.env["GEMINI_MODEL"] || "gemini-3.8-flash";
-}
-
-async function callGemini(key: string, body: unknown): Promise<unknown> {
-  const res = await fetch(`${GEMINI_BASE}/${model()}:generateContent?key=${key}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90_000),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Gemini API ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  return res.json();
-}
-
-function extractText(result: unknown): string {
-  const candidates = (result as { candidates?: { content?: { parts?: { text?: string }[] } }[] })?.candidates;
-  const parts = candidates?.[0]?.content?.parts ?? [];
-  return parts.map((p) => p.text ?? "").join("").trim();
-}
-
-export const aiStatus = createServerFn({ method: "GET" }).handler(async (): Promise<{ configured: boolean }> => {
-  return { configured: Boolean(process.env["GEMINI_API_KEY"]) };
-});
-
-export const transcribeAudio = createServerFn({ method: "POST" })
-  .inputValidator((data) => z.object({ audioBase64: z.string().min(1), mime: z.string().min(1) }).parse(data))
-  .handler(async ({ data }): Promise<TranscribeResponse> => {
-    const key = process.env["GEMINI_API_KEY"];
-    if (!key) {
-      return { ok: false, reason: "no-key", message: "Kunci GEMINI_API_KEY belum diisi di Project Settings → Secrets." };
-    }
+export const verifyAccess = createServerFn({ method: "POST" })
+  .inputValidator((data) => z.object({ code: codeField }).parse(data))
+  .handler(async ({ data }): Promise<VerifyResponse> => {
+    const parsed = parseAccessCode(data.code);
+    if (!parsed) return { ok: false, reason: "no-access", message: "Format kode akses tidak dikenali." };
+    const { checkKieKey, KieError } = await import("./kie.server");
     try {
-      const result = await callGemini(key, {
-        contents: [
-          {
-            parts: [
-              { text: TRANSCRIBE_PROMPT },
-              { inline_data: { mime_type: data.mime, data: data.audioBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0, responseMimeType: "application/json" },
-      });
-      const raw = extractText(result);
-      const cleaned = raw.replace(/^```json\s*/i, "").replace(/```\s*$/, "");
-      const parsed = transcriptSchema.safeParse(JSON.parse(cleaned));
-      if (!parsed.success) {
-        return { ok: false, reason: "parse-error", message: "Hasil transkrip tidak valid." };
-      }
-      return { ok: true, items: parsed.data.items, fullText: parsed.data.fullText };
+      await checkKieKey(parsed.key);
+      return { ok: true, plan: parsed.plan };
     } catch (err) {
-      console.error("transcribeAudio failed:", err);
-      return { ok: false, reason: "api-error", message: err instanceof Error ? err.message : "Gagal memanggil Gemini." };
+      const status = err instanceof KieError ? err.status : 500;
+      return {
+        ok: false,
+        reason: status === 402 ? "no-credit" : status === 401 ? "no-access" : "api-error",
+        message: err instanceof Error ? err.message : "Gagal memeriksa kode.",
+      };
     }
   });
 
-export const planScenes = createServerFn({ method: "POST" })
-  .inputValidator((data) => z.object({ sentences: z.array(z.string().min(1)).min(1) }).parse(data))
-  .handler(async ({ data }): Promise<PlanResponse> => {
-    const key = process.env["GEMINI_API_KEY"];
-    if (!key) {
-      return { ok: false, reason: "no-key", message: "Kunci GEMINI_API_KEY belum diisi di Project Settings → Secrets." };
+export const designScenes = createServerFn({ method: "POST" })
+  .inputValidator((data) =>
+    z
+      .object({
+        code: codeField,
+        mode: z.enum(["explainer", "edit"]),
+        aspect: z.string().max(8),
+        scenes: z.array(z.object({ text: z.string().min(1).max(600), seconds: z.number().min(0).max(600) })).min(1).max(120),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }): Promise<DesignResponse> => {
+    const parsed = parseAccessCode(data.code);
+    if (!parsed) return { ok: false, reason: "no-access", message: "Kode akses tidak valid." };
+    if (data.mode === "edit" && !PLANS[parsed.plan].modes.includes("edit")) {
+      return { ok: false, reason: "limit", message: "Mode Edit Video hanya untuk paket Pro Creator." };
     }
-    const prompt = scenePlanPrompt(data.sentences);
-    const body = {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, responseMimeType: "application/json" },
-    };
-    // Dua percobaan: kalau hasil pertama gagal validasi, minta sekali lagi.
+    const { callClaudeTool, extractJson, KieError } = await import("./kie.server");
+    const prompt = designPrompt({ mode: data.mode, aspect: data.aspect, scenes: data.scenes });
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const result = await callGemini(key, body);
-        const raw = extractText(result);
-        const cleaned = raw.replace(/^```json\s*/i, "").replace(/```\s*$/, "");
-        const parsed = scenePlanSchema.safeParse(JSON.parse(cleaned));
-        if (parsed.success) {
-          const scenes = parsed.data.scenes.slice(0, data.sentences.length);
-          return { ok: true, scenes };
+        const out = await callClaudeTool(parsed.key, prompt, DESIGN_TOOL);
+        const candidate = out.toolInput ?? extractJson(out.text);
+        const result = designPlanSchema.safeParse(candidate);
+        if (result.success) {
+          return { ok: true, plan: { ...result.data, scenes: result.data.scenes.slice(0, data.scenes.length) } };
         }
+        console.error("designScenes: hasil tidak valid", result.error.issues.slice(0, 3));
       } catch (err) {
-        console.error("planScenes failed:", err);
-        const message = err instanceof Error ? err.message : "Gagal memanggil Gemini.";
-        return { ok: false, reason: "api-error", message };
+        console.error("designScenes failed:", err);
+        const status = err instanceof KieError ? err.status : 500;
+        if (status === 401 || status === 402 || status === 422) {
+          return { ok: false, reason: status === 402 ? "no-credit" : "no-access", message: (err as Error).message };
+        }
+        if (attempt === 1 || status === 429) {
+          return { ok: false, reason: "api-error", message: err instanceof Error ? err.message : "Gagal memanggil AI." };
+        }
       }
     }
-    return { ok: false, reason: "parse-error", message: "Rencana adegan tidak valid — pakai susunan generik." };
+    return { ok: false, reason: "parse-error", message: "Rancangan AI tidak valid — coba lagi atau pakai susunan otomatis." };
+  });
+
+/** ~32 KB per detik (WAV 16 kHz mono 16-bit). */
+const WAV_BYTES_PER_SEC = 32_000;
+
+export const transcribeChunks = createServerFn({ method: "POST" })
+  .inputValidator((data) =>
+    z
+      .object({
+        code: codeField,
+        chunks: z.array(z.string().min(100)).min(1).max(40),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }): Promise<TranscribeResponse> => {
+    const parsed = parseAccessCode(data.code);
+    if (!parsed) return { ok: false, reason: "no-access", message: "Kode akses tidak valid." };
+    const bytes = data.chunks.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    const total = bytes.reduce((a, b) => a + b.length, 0);
+    const maxSec = PLANS[parsed.plan].maxSeconds + 5;
+    if (total > maxSec * WAV_BYTES_PER_SEC + 4096) {
+      return { ok: false, reason: "limit", message: `Audio melebihi batas paket (${PLANS[parsed.plan].maxSeconds} detik).` };
+    }
+    const { checkKieKey, KieError } = await import("./kie.server");
+    try {
+      await checkKieKey(parsed.key);
+    } catch (err) {
+      const status = err instanceof KieError ? err.status : 500;
+      return { ok: false, reason: status === 402 ? "no-credit" : "no-access", message: (err as Error).message };
+    }
+    const apiKey = process.env["LOVABLE_API_KEY"];
+    if (!apiKey) return { ok: false, reason: "api-error", message: "Layanan transkrip belum dikonfigurasi." };
+    const { transcribeWav, TranscribeError } = await import("./transcribe.server");
+    try {
+      const texts: string[] = [];
+      for (const wav of bytes) texts.push(await transcribeWav(apiKey, wav));
+      return { ok: true, texts };
+    } catch (err) {
+      console.error("transcribeChunks failed:", err);
+      return {
+        ok: false,
+        reason: "api-error",
+        message: err instanceof TranscribeError ? err.message : "Transkrip gagal — coba lagi.",
+      };
+    }
   });

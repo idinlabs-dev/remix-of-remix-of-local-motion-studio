@@ -2,11 +2,15 @@
 // mediabunny jadi MP4 (H.264+AAC) atau fallback WebM (VP9+Opus).
 
 import {
+  ALL_FORMATS,
   AudioSample,
   AudioSampleSource,
+  BlobSource,
   BufferTarget,
+  CanvasSink,
   canEncodeAudio,
   canEncodeVideo,
+  Input,
   Mp4OutputFormat,
   Output,
   VideoSample,
@@ -14,9 +18,11 @@ import {
   WebMOutputFormat,
   type AudioCodec,
   type VideoCodec,
+  type WrappedCanvas,
 } from "mediabunny";
 
 import { drawFrame, type RenderAssets } from "@/lib/engine/renderer";
+import { ensureThemeFonts } from "@/lib/engine/themes";
 import type { Composition } from "@/lib/engine/types";
 
 export type ContainerKind = "mp4" | "webm";
@@ -90,13 +96,15 @@ export interface RenderOptions {
   comp: Composition;
   assets: RenderAssets;
   audio?: AudioBuffer | null;
+  /** Mode edit: file video sumber — frame di-decode akurat per timestamp. */
+  video?: Blob | null;
   onProgress?: (p: RenderProgress) => void;
   signal?: AbortSignal;
 }
 
 /** Render komposisi + audio jadi file video di browser. */
 export async function renderComposition(options: RenderOptions): Promise<RenderResult> {
-  const { comp, assets, audio, onProgress, signal } = options;
+  const { comp, assets, audio, video, onProgress, signal } = options;
   const profile = await chooseEncodeProfile();
   if (!profile) {
     throw new Error(
@@ -104,9 +112,32 @@ export async function renderComposition(options: RenderOptions): Promise<RenderR
     );
   }
   onProgress?.({ phase: "preparing", frame: 0, totalFrames: 0 });
+  await ensureThemeFonts(comp.theme.font);
 
   const fps = comp.fps;
   const totalFrames = Math.max(1, Math.round(comp.duration * fps));
+
+  // Sumber frame video (mode edit) — iterasi berurutan, efisien.
+  let videoInput: Input | null = null;
+  let frameIter: AsyncIterator<WrappedCanvas | null> | null = null;
+  if (video) {
+    videoInput = new Input({ source: new BlobSource(video), formats: ALL_FORMATS });
+    const track = await videoInput.getPrimaryVideoTrack();
+    if (track) {
+      const longSide = Math.max(comp.width, comp.height);
+      const scale = Math.min(1, longSide / Math.max(track.displayWidth, track.displayHeight));
+      const sink = new CanvasSink(track, {
+        width: Math.round(track.displayWidth * scale),
+        height: Math.round(track.displayHeight * scale),
+        fit: "fill",
+        poolSize: 2,
+      });
+      const stamps = function* () {
+        for (let f = 0; f < totalFrames; f++) yield f / fps;
+      };
+      frameIter = sink.canvasesAtTimestamps(stamps())[Symbol.asyncIterator]();
+    }
+  }
 
   const output = new Output({
     format:
@@ -139,13 +170,27 @@ export async function renderComposition(options: RenderOptions): Promise<RenderR
   await output.start();
 
   const chunk = 0.5; // detik per sampel audio
-  const totalAudioChunks = audio ? Math.ceil(audio.duration / chunk) : 0;
+  const totalAudioChunks = audio ? Math.ceil(Math.min(audio.duration, comp.duration) / chunk) : 0;
+  let lastFrame: WrappedCanvas | null = null;
 
   try {
     for (let frame = 0; frame < totalFrames; frame++) {
       if (signal?.aborted) throw new DOMException("Render dibatalkan", "AbortError");
       const t = frame / fps;
-      drawFrame(ctx, comp, t, assets);
+      let frameAssets = assets;
+      if (frameIter) {
+        const next = await frameIter.next();
+        if (!next.done && next.value) lastFrame = next.value;
+        if (lastFrame) {
+          frameAssets = {
+            ...assets,
+            video: lastFrame.canvas as CanvasImageSource,
+            videoWidth: lastFrame.canvas.width,
+            videoHeight: lastFrame.canvas.height,
+          };
+        }
+      }
+      drawFrame(ctx, comp, t, frameAssets);
       const sample = new VideoSample(canvas as unknown as CanvasImageSource, {
         timestamp: t,
         duration: 1 / fps,

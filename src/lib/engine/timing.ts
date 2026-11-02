@@ -173,3 +173,64 @@ export function wordTimings(
     return t;
   });
 }
+
+/**
+ * Potong audio panjang jadi beberapa bagian (untuk transkrip per bagian) —
+ * batas dipilih di tengah jeda terdekat dari target panjang.
+ */
+export function chunkRanges(
+  silences: Silence[],
+  duration: number,
+  target = 12,
+  maxLen = 20,
+): { start: number; end: number }[] {
+  if (duration <= 0) return [];
+  const mids = silences
+    .map((s) => (s.start + s.end) / 2)
+    .filter((m) => m > 0.5 && m < duration - 0.5)
+    .sort((a, b) => a - b);
+  const out: { start: number; end: number }[] = [];
+  let start = 0;
+  while (duration - start > maxLen) {
+    const ideal = start + target;
+    const cands = mids.filter((m) => m > start + target * 0.5 && m <= start + maxLen);
+    let cut = ideal;
+    for (const m of cands) if (Math.abs(m - ideal) < Math.abs(cut - ideal) || cut === ideal) cut = m;
+    out.push({ start, end: cut });
+    start = cut;
+  }
+  out.push({ start, end: duration });
+  return out;
+}
+
+/**
+ * Gabungkan transkrip per bagian jadi kalimat ber-waktu: tiap bagian punya
+ * waktu pasti, di dalamnya kalimat diselaraskan ke jeda audio.
+ */
+export function alignChunks(
+  chunks: { start: number; end: number; text: string }[],
+  silences: Silence[],
+  duration: number,
+): TimedSentence[] {
+  const out: TimedSentence[] = [];
+  for (const c of chunks) {
+    const sentences = splitSentences(c.text);
+    if (sentences.length === 0) {
+      const prev = out[out.length - 1];
+      if (prev) prev.end = c.end;
+      continue;
+    }
+    const len = c.end - c.start;
+    const local = silences
+      .filter((s) => s.start >= c.start && s.end <= c.end)
+      .map((s) => ({ start: s.start - c.start, end: s.end - c.start }));
+    for (const t of buildTimings(sentences, local, len)) {
+      out.push({ text: t.text, start: t.start + c.start, end: t.end + c.start });
+    }
+  }
+  const first = out[0];
+  if (first) first.start = 0;
+  const last = out[out.length - 1];
+  if (last) last.end = Math.max(last.end, duration);
+  return out;
+}
