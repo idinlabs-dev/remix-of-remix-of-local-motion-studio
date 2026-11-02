@@ -18,6 +18,7 @@ import { formatRupiah, PLANS, remainingVideos, type PlanId } from "@/lib/access/
 import { formatCountdown, makeOrderId, msUntilJakartaMidnight } from "@/lib/access/promo";
 import { activateAccess, useAccess } from "@/lib/access/store";
 import { newComposition, type Aspect, type Composition, type Mode } from "@/lib/engine/types";
+import { getGitHubStatus } from "@/lib/github/github.functions";
 import { SITE_DESCRIPTION, SITE_NAME, canonicalLink, socialUrlMeta } from "@/lib/seo";
 import { deleteProject, listProjects, saveProject, type ProjectMeta } from "@/lib/storage/db";
 
@@ -246,9 +247,13 @@ function ProjectList() {
   const [accessOpen, setAccessOpen] = useState(false);
   const [countdown, setCountdown] = useState(() => msUntilJakartaMidnight(Date.now()));
   const [checkout, setCheckout] = useState<{ plan: PlanId; orderId: string } | null>(null);
+  const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     void listProjects().then(setProjects);
+    void getGitHubStatus()
+      .then((status) => setGithubConnected(status.connected))
+      .catch(() => setGithubConnected(false));
   }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setCountdown(msUntilJakartaMidnight(Date.now())), 1000);
@@ -256,6 +261,12 @@ function ProjectList() {
   }, []);
 
   const createProject = async () => {
+    if (!githubConnected) {
+      toast.error("Silakan login terlebih dahulu untuk membuat project dan video.");
+      const target = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
+      return;
+    }
     setBusy(true);
     try {
       const comp: Composition = newComposition(
@@ -291,7 +302,11 @@ function ProjectList() {
             {a}
           </button>
         ))}
-        <Button onClick={() => void createProject()} disabled={busy} className="ml-auto font-bold">
+        <Button
+          onClick={() => void createProject()}
+          disabled={busy || githubConnected === null}
+          className="ml-auto font-bold"
+        >
           <Plus className="size-4" /> Project baru
         </Button>
       </div>
@@ -376,8 +391,8 @@ function ProjectList() {
 
 function Index() {
   return (
-    <div className="grid-paper min-h-screen">
-      <main className="mx-auto max-w-5xl px-4 py-12">
+    <div className="min-h-screen bg-white">
+      <main className="mx-auto max-w-5xl px-4 py-16 sm:px-6 lg:px-8">
         <header className="mb-10">
           <p className="font-bold uppercase tracking-widest text-primary">
             Studio video narasi otomatis
@@ -387,7 +402,7 @@ function Index() {
           </h1>
           <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
             Creative Director AI memilih mood, layout, warna, ikon, dan timing sesuai topikmu.
-            Render dan encode tetap berjalan di device kamu.
+            Preview tetap ringan di browser, lalu video final dibuat melalui akun GitHub kamu.
           </p>
           <div className="mt-5 flex items-center gap-2 text-sm font-semibold">
             <Sparkles className="size-4 text-primary" /> Topik bebas: sains, horor, finansial,

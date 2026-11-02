@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { FloatingMenu } from "@/components/FloatingMenu";
 import { Toaster } from "@/components/ui/sonner";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo";
 
@@ -83,7 +84,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: SITE_NAME },
       { name: "description", content: SITE_DESCRIPTION },
       { name: "author", content: SITE_NAME },
-      { name: "keywords", content: "AI video editor, motion graphics, explainer video, talking head, Remotion" },
+      {
+        name: "keywords",
+        content: "AI video editor, motion graphics, explainer video, talking head, Remotion",
+      },
       { name: "theme-color", content: "#f2761b" },
       { property: "og:title", content: SITE_NAME },
       { property: "og:description", content: SITE_DESCRIPTION },
@@ -94,10 +98,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:description", content: SITE_DESCRIPTION },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
@@ -134,6 +135,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <FloatingMenu />
       <Toaster position="bottom-center" richColors />
     </QueryClientProvider>
   );

@@ -35,12 +35,7 @@ import {
 } from "@/lib/engine/timing";
 import { parseSrt } from "@/lib/engine/srt";
 import { ASPECT_DIMENSIONS, type Aspect, type Composition } from "@/lib/engine/types";
-import {
-  decodeAudio,
-  decodeVideoAudio,
-  renderComposition,
-  type RenderProgress,
-} from "@/lib/encode/exporter";
+import { decodeAudio, decodeVideoAudio, type RenderProgress } from "@/lib/encode/exporter";
 import { buildRemotionZip } from "@/lib/export/remotion-zip";
 import { unzipSync } from "fflate";
 import {
@@ -142,7 +137,8 @@ function EditorPage() {
       const current = new URL(window.location.href);
       current.searchParams.delete("github");
       window.history.replaceState({}, "", `${current.pathname}${current.search}${current.hash}`);
-      if (result === "connected") toast.success("GitHub tersambung. Render otomatis siap digunakan.");
+      if (result === "connected")
+        toast.success("GitHub tersambung. Render otomatis siap digunakan.");
       else toast.error("Koneksi GitHub belum berhasil. Coba lagi.");
     }
     void getGitHubStatus()
@@ -224,7 +220,7 @@ function EditorPage() {
 
   if (missing) {
     return (
-      <div className="grid-paper flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-screen items-center justify-center bg-white px-4">
         <div className="max-w-sm rounded-xl border-2 border-foreground/20 bg-card p-8 text-center">
           <p className="font-bold">Project tidak ditemukan</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -242,7 +238,7 @@ function EditorPage() {
 
   if (!comp) {
     return (
-      <div className="grid-paper flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <p className="text-sm text-muted-foreground">Memuat project…</p>
       </div>
     );
@@ -438,16 +434,12 @@ function EditorPage() {
       start: scene.start,
       end: scene.end,
     });
-    const scenes = comp.scenes.map((s, i) =>
-      i === index ? { ...generic, id: s.id } : s,
-    );
+    const scenes = comp.scenes.map((s, i) => (i === index ? { ...generic, id: s.id } : s));
     await persist({ ...comp, scenes, updatedAt: Date.now() });
   };
 
   const updateSceneText = async (index: number, text: string) => {
-    const scenes = comp.scenes.map((s, i) =>
-      i === index ? { ...s, text } : s,
-    );
+    const scenes = comp.scenes.map((s, i) => (i === index ? { ...s, text } : s));
     const nextNarration = scenes.map((scene) => scene.text).join(" ");
     setNarration(nextNarration);
     await persist({ ...comp, scenes, narration: nextNarration, updatedAt: Date.now() });
@@ -460,6 +452,12 @@ function EditorPage() {
 
   // ---- render & ekspor ----
   const renderNow = async () => {
+    if (!githubStatus.connected) {
+      toast.error("Silakan login terlebih dahulu untuk membuat video.");
+      const target = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
+      return;
+    }
     if (comp.scenes.length === 0 || comp.duration <= 0) {
       toast.error("Susun timeline dulu sebelum render.");
       return;
@@ -478,7 +476,7 @@ function EditorPage() {
       let resultMime: string;
       let resultName: string;
       let resultMessage: string;
-      if (githubStatus.connected) {
+      {
         setRemoteMessage("Menyiapkan video…");
         const packageBlob = await buildRemotionZip(comp, {
           audio: audioRec ? { name: audioRec.name, blob: audioRec.blob } : null,
@@ -486,7 +484,9 @@ function EditorPage() {
           video: videoRec ? { name: videoRec.name, blob: videoRec.blob } : null,
         });
         if (packageBlob.size > 70 * 1024 * 1024) {
-          throw new Error("Ukuran media terlalu besar untuk render otomatis. Kurangi media atau gunakan render di perangkat ini.");
+          throw new Error(
+            "Ukuran media terlalu besar untuk render otomatis. Kurangi ukuran media lalu coba lagi.",
+          );
         }
         setRemoteMessage("Mengirim video…");
         const startResponse = await fetch("/api/github/render", {
@@ -495,9 +495,11 @@ function EditorPage() {
           body: packageBlob,
           signal: controller.signal,
         });
-        const startData = (await startResponse.json().catch(() => null)) as
-          | { runId?: number; tag?: string; error?: string }
-          | null;
+        const startData = (await startResponse.json().catch(() => null)) as {
+          runId?: number;
+          tag?: string;
+          error?: string;
+        } | null;
         if (!startResponse.ok || !startData?.runId || !startData.tag) {
           throw new Error(startData?.error ?? "Render otomatis belum bisa dimulai.");
         }
@@ -515,52 +517,34 @@ function EditorPage() {
           } else if (status.status === "in_progress") {
             setRemoteMessage("Sedang membuat video…");
           } else if (status.status === "completed") {
-            if (status.conclusion !== "success") throw new Error("Render otomatis gagal. Coba render lagi.");
+            if (status.conclusion !== "success")
+              throw new Error("Render otomatis gagal. Coba render lagi.");
             completed = true;
             break;
           }
         }
-        if (!completed) throw new Error("Render memerlukan waktu lebih lama dari batas yang diizinkan.");
+        if (!completed)
+          throw new Error("Render memerlukan waktu lebih lama dari batas yang diizinkan.");
         setRemoteMessage("Mengambil hasil video…");
         const artifactResponse = await fetch(
           `/api/github/artifact?runId=${remoteRun.runId}&tag=${encodeURIComponent(remoteRun.tag)}`,
           { signal: controller.signal },
         );
         if (!artifactResponse.ok) {
-          const detail = (await artifactResponse.json().catch(() => null)) as { error?: string } | null;
+          const detail = (await artifactResponse.json().catch(() => null)) as {
+            error?: string;
+          } | null;
           throw new Error(detail?.error ?? "Video selesai tetapi belum bisa diunduh.");
         }
         const archive = unzipSync(new Uint8Array(await artifactResponse.arrayBuffer()));
         const videoPath = Object.keys(archive).find((path) => path.endsWith("video.mp4"));
         const videoBytes = videoPath ? archive[videoPath] : undefined;
-        if (!videoBytes?.byteLength) throw new Error("File video tidak ditemukan dalam hasil render.");
+        if (!videoBytes?.byteLength)
+          throw new Error("File video tidak ditemukan dalam hasil render.");
         resultBlob = new Blob([Uint8Array.from(videoBytes).buffer], { type: "video/mp4" });
         resultMime = "video/mp4";
         resultName = `${comp.title}.mp4`;
         resultMessage = "Render selesai — video siap diputar dan diunduh.";
-      } else {
-        const audio =
-          decoded ??
-          (audioRec
-            ? await decodeAudio(audioRec.blob)
-            : videoRec
-              ? await decodeVideoAudio(videoRec.blob)
-              : null);
-        if (audio && !decoded) setDecoded(audio);
-        const result = await renderComposition({
-          comp,
-          assets: bgBitmap
-            ? { bg: bgBitmap, bgWidth: bgBitmap.width, bgHeight: bgBitmap.height }
-            : {},
-          audio,
-          video: videoRec?.blob ?? null,
-          onProgress: setProgress,
-          signal: controller.signal,
-        });
-        resultBlob = result.blob;
-        resultMime = result.profile.mime;
-        resultName = `${comp.title}.${result.profile.ext}`;
-        resultMessage = `Render selesai — ${result.profile.container.toUpperCase()}.`;
       }
       await putRender({
         id: crypto.randomUUID(),
@@ -580,7 +564,10 @@ function EditorPage() {
     } catch (err) {
       if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError"))
         toast.info("Render dibatalkan.");
-      else toast.error(err instanceof Error ? `Render gagal: ${err.message}` : "Render gagal. Coba lagi.");
+      else
+        toast.error(
+          err instanceof Error ? `Render gagal: ${err.message}` : "Render gagal. Coba lagi.",
+        );
     } finally {
       setBusy(null);
       setProgress(null);
@@ -645,7 +632,7 @@ function EditorPage() {
   const ready = comp.scenes.length > 0 && comp.duration > 0;
 
   return (
-    <div className="grid-paper min-h-screen pb-16">
+    <div className="min-h-screen bg-white pb-16">
       <input
         ref={audioInputRef}
         type="file"
@@ -857,34 +844,39 @@ function EditorPage() {
             >
               <Film className="size-4" /> {busy === "render" ? "Merender…" : "Render video"}
             </Button>
-            {githubStatus.configured && (
-              <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
-                {githubStatus.connected ? (
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="flex min-w-0 items-center gap-2 font-semibold">
-                      <Github className="size-4 shrink-0" />
-                      <span className="truncate">Render otomatis aktif{githubStatus.login ? ` · @${githubStatus.login}` : ""}</span>
+            <div className="mt-3 rounded-lg border border-border bg-slate-50 p-3">
+              {githubStatus.connected ? (
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 items-center gap-2 font-semibold">
+                    <Github className="size-4 shrink-0" />
+                    <span className="truncate">
+                      Render otomatis aktif{githubStatus.login ? ` · @${githubStatus.login}` : ""}
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="shrink-0"
-                      disabled={busy !== null}
-                      onClick={() => {
-                        setBusy("github-disconnect");
-                        void disconnectGitHub()
-                          .then(() => {
-                            setGithubStatus({ configured: true, connected: false });
-                            toast.success("Akun GitHub diputuskan.");
-                          })
-                          .catch(() => toast.error("Koneksi GitHub belum bisa diputuskan."))
-                          .finally(() => setBusy(null));
-                      }}
-                    >
-                      <Unplug className="size-3.5" /> Putuskan
-                    </Button>
-                  </div>
-                ) : (
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setBusy("github-disconnect");
+                      void disconnectGitHub()
+                        .then(() => {
+                          setGithubStatus({ configured: true, connected: false });
+                          toast.success("Akun GitHub diputuskan.");
+                        })
+                        .catch(() => toast.error("Koneksi GitHub belum bisa diputuskan."))
+                        .finally(() => setBusy(null));
+                    }}
+                  >
+                    <Unplug className="size-3.5" /> Putuskan
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Silakan login terlebih dahulu untuk membuat video final.
+                  </p>
                   <Button
                     variant="outline"
                     size="sm"
@@ -892,21 +884,24 @@ function EditorPage() {
                     disabled={busy !== null}
                     onClick={() => {
                       const target = `${window.location.pathname}${window.location.search}`;
-                      window.location.assign(`/api/github/connect?returnTo=${encodeURIComponent(target)}`);
+                      window.location.assign(
+                        `/api/github/connect?returnTo=${encodeURIComponent(target)}`,
+                      );
                     }}
                   >
-                    <Github className="size-4" /> Aktifkan Render Cepat
+                    <Github className="size-4" /> Login dengan GitHub
                   </Button>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
             {busy === "render" && progress && (
               <div className="mt-3">
                 <Progress
                   value={progress.totalFrames ? (progress.frame / progress.totalFrames) * 100 : 0}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {remoteMessage ?? `${progress.phase} ${progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}`}
+                  {remoteMessage ??
+                    `${progress.phase} ${progress.totalFrames ? `${progress.frame}/${progress.totalFrames} frame` : ""}`}
                 </p>
                 <Button
                   variant="ghost"

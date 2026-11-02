@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GalleryRouteImport } from './routes/gallery'
 import { Route as ProjectIdRouteImport } from './routes/project.$id'
 import { Route as ApiGithubArtifactRouteImport } from './routes/api/github/artifact'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api/github/callback'
@@ -19,6 +20,11 @@ import { Route as ApiGithubRenderRouteImport } from './routes/api/github/render'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GalleryRoute = GalleryRouteImport.update({
+  id: '/gallery',
+  path: '/gallery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectIdRoute = ProjectIdRouteImport.update({
@@ -49,6 +55,7 @@ const ApiGithubRenderRoute = ApiGithubRenderRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
   '/api/github/artifact': typeof ApiGithubArtifactRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -57,6 +64,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
   '/api/github/artifact': typeof ApiGithubArtifactRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -66,6 +74,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/gallery': typeof GalleryRoute
   '/project/$id': typeof ProjectIdRoute
   '/api/github/artifact': typeof ApiGithubArtifactRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -76,6 +85,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/gallery'
     | '/project/$id'
     | '/api/github/artifact'
     | '/api/github/callback'
@@ -84,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/gallery'
     | '/project/$id'
     | '/api/github/artifact'
     | '/api/github/callback'
@@ -92,6 +103,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/gallery'
     | '/project/$id'
     | '/api/github/artifact'
     | '/api/github/callback'
@@ -101,6 +113,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  GalleryRoute: typeof GalleryRoute
   ProjectIdRoute: typeof ProjectIdRoute
   ApiGithubArtifactRoute: typeof ApiGithubArtifactRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
@@ -115,6 +128,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gallery': {
+      id: '/gallery'
+      path: '/gallery'
+      fullPath: '/gallery'
+      preLoaderRoute: typeof GalleryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/project/$id': {
@@ -157,6 +177,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  GalleryRoute: GalleryRoute,
   ProjectIdRoute: ProjectIdRoute,
   ApiGithubArtifactRoute: ApiGithubArtifactRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,

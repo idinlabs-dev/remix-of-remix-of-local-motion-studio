@@ -120,6 +120,8 @@ export interface Composition {
   duration: number;
   scenes: Scene[];
   theme: Theme;
+  /** Identitas bahasa visual; opsional agar project lama tetap valid. */
+  stylePackId?: string | undefined;
   subtitleOn: boolean;
   narration?: string | undefined;
   /** Sudah pernah dirancang AI (dipakai untuk hitung kuota). */
@@ -157,6 +159,7 @@ export function newComposition(title: string, aspect: Aspect = "9:16", mode: Mod
     duration: 0,
     scenes: [],
     theme: { ...DEFAULT_THEME },
+    stylePackId: "creator-explainer",
     subtitleOn: true,
     createdAt: now,
     updatedAt: now,
@@ -212,6 +215,7 @@ export function normalizeComposition(raw: unknown): Composition {
     duration: Number(r["duration"]) || 0,
     scenes,
     theme,
+    stylePackId: typeof r["stylePackId"] === "string" ? (r["stylePackId"] as string) : "creator-explainer",
     subtitleOn: r["subtitleOn"] !== false,
     narration: typeof r["narration"] === "string" ? (r["narration"] as string) : undefined,
     aiDesigned: r["aiDesigned"] === true,
