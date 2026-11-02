@@ -15,9 +15,28 @@ export class KieError extends Error {
 
 function friendly(status: number, msg: string): KieError {
   if (status === 401 || status === 403) return new KieError(401, "Kode akses tidak valid atau sudah dinonaktifkan.");
-  if (status === 402) return new KieError(402, "Provider AI menolak request (402). Minta admin memeriksa API key dan akses Kie.ai.");
+  if (status === 402) return new KieError(402, "Saldo API key Kie.ai habis atau tidak mencukupi. Minta admin memeriksa key/kredit Kie.ai.");
   if (status === 429) return new KieError(429, "Server AI sedang sibuk. Coba lagi sebentar lagi.");
   return new KieError(status || 500, msg ? `Layanan AI error: ${msg.slice(0, 160)}` : "Layanan AI sedang bermasalah.");
+}
+
+/** Verifikasi API key dan saldo kredit sebelum kode akses diaktifkan. */
+export async function checkKieKey(key: string): Promise<{ credits: number }> {
+  const res = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const body = (await res.json().catch(() => null)) as {
+    code?: number;
+    msg?: string;
+    data?: number;
+  } | null;
+  const code = body?.code ?? res.status;
+  if (!res.ok || code !== 200) throw friendly(code === 200 ? res.status : code, body?.msg ?? "");
+  const credits = body?.data;
+  if (typeof credits !== "number" || !Number.isFinite(credits) || credits <= 0) {
+    throw friendly(402, "");
+  }
+  return { credits };
 }
 
 interface ToolResult {

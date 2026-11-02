@@ -82,7 +82,7 @@ function AccessDialog({
         <DialogHeader>
           <DialogTitle>Aktifkan Kode Akses</DialogTitle>
           <DialogDescription>
-            Masukkan kode dari admin. Paket ditentukan oleh prefiks kode; API key dan kredit diperiksa manual oleh admin.
+            API key dan saldo kredit Kie.ai divalidasi di server sebelum kode akses diaktifkan.
           </DialogDescription>
         </DialogHeader>
         <Input

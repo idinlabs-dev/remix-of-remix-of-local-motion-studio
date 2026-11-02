@@ -15,9 +15,18 @@ export const verifyAccess = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<VerifyResponse> => {
     const parsed = parseAccessCode(data.code);
     if (!parsed) return { ok: false, reason: "no-access", message: "Format kode tidak dikenali. Minta kode akses ke admin." };
-    // Validasi API key dan saldo dilakukan manual oleh admin. Aktivasi situs
-    // tidak menghubungi Kie.ai; prefiks kode hanya menentukan paket lokal.
-    return { ok: true, plan: parsed.plan };
+    const { checkKieKey, KieError } = await import("./kie.server");
+    try {
+      await checkKieKey(parsed.key);
+      return { ok: true, plan: parsed.plan };
+    } catch (err) {
+      const status = err instanceof KieError ? err.status : 500;
+      return {
+        ok: false,
+        reason: status === 402 ? "no-credit" : status === 401 ? "no-access" : "api-error",
+        message: err instanceof Error ? err.message : "Gagal memvalidasi API key dan kredit Kie.ai.",
+      };
+    }
   });
 
 export const designScenes = createServerFn({ method: "POST" })
@@ -82,6 +91,17 @@ export const transcribeChunks = createServerFn({ method: "POST" })
     const maxSec = PLANS[parsed.plan].maxSeconds + 5;
     if (total > maxSec * WAV_BYTES_PER_SEC + 4096) {
       return { ok: false, reason: "limit", message: `Audio melebihi batas paket (${PLANS[parsed.plan].maxSeconds} detik).` };
+    }
+    const { checkKieKey, KieError } = await import("./kie.server");
+    try {
+      await checkKieKey(parsed.key);
+    } catch (err) {
+      const status = err instanceof KieError ? err.status : 500;
+      return {
+        ok: false,
+        reason: status === 402 ? "no-credit" : "no-access",
+        message: (err as Error).message,
+      };
     }
     const apiKey = process.env["LOVABLE_API_KEY"];
     if (!apiKey) return { ok: false, reason: "api-error", message: "Layanan transkrip belum dikonfigurasi." };
