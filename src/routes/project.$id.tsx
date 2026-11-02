@@ -581,7 +581,7 @@ function EditorPage() {
       <input
         ref={srtInputRef}
         type="file"
-        accept=".srt,application/x-subrip,application/srt,text/plain"
+        accept=".srt,text/srt,application/x-subrip,application/srt,text/plain"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];

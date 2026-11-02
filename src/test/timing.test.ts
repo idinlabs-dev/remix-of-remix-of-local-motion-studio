@@ -123,6 +123,20 @@ describe("parseSrt", () => {
     expect(cues.map((cue) => cue.text)).toEqual(["Pertama", "Kedua"]);
   });
 
+  it("membaca format timestamp file POV_Petir_Timestamp.srt", () => {
+    const cues = parseSrt(
+      "1\n00:00:00,000 --> 00:00:02,783\nPOV lo kesambar petir satu miliar volt.\n\n2\n00:00:02,783 --> 00:00:06,709\nDalam nol koma satu detik suhu tiga puluh ribu derajat.\n\n10\n00:00:24,410 --> 00:00:38,399\nPetir itu enggak nyari orang tinggi, dia nyari jalur tercepat ke tanah dan kadang itu lo.",
+    );
+
+    expect(cues).toHaveLength(3);
+    expect(cues[0]).toEqual({
+      text: "POV lo kesambar petir satu miliar volt.",
+      start: 0,
+      end: 2.783,
+    });
+    expect(cues[2]?.end).toBe(38.399);
+  });
+
   it("menolak file tanpa cue valid", () => {
     expect(() => parseSrt("bukan file subtitle")).toThrow("Tidak ada subtitle SRT valid");
   });
