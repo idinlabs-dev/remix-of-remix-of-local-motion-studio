@@ -2,6 +2,8 @@
 // deterministik dari waktu (detik) ke frame. Universal untuk topik apa pun:
 // AI (Creative Director) memilih tema visual + pola layout per adegan.
 
+import type { VisualDirection } from "./visual-direction";
+
 export type Aspect = "9:16" | "16:9" | "1:1";
 
 export const ASPECT_DIMENSIONS: Record<Aspect, { width: number; height: number }> = {
@@ -44,13 +46,40 @@ export const LAYOUT_LABELS: Record<LayoutKind, string> = {
 export const TRANSITIONS = ["wipe", "zoom", "slide", "fade", "glitch"] as const;
 export type Transition = (typeof TRANSITIONS)[number];
 
-export const FONT_KEYS = ["grotesk", "serif", "condensed", "hand", "mono", "horror", "rounded", "heavy"] as const;
+export const FONT_KEYS = [
+  "grotesk",
+  "serif",
+  "condensed",
+  "hand",
+  "mono",
+  "horror",
+  "rounded",
+  "heavy",
+] as const;
 export type FontKey = (typeof FONT_KEYS)[number];
 
-export const BACKGROUNDS = ["paper-grid", "gradient", "dots", "noise-dark", "stars", "topo", "blueprint", "plain"] as const;
+export const BACKGROUNDS = [
+  "paper-grid",
+  "gradient",
+  "dots",
+  "noise-dark",
+  "stars",
+  "topo",
+  "blueprint",
+  "plain",
+] as const;
 export type BackgroundStyle = (typeof BACKGROUNDS)[number];
 
-export const PARTICLES = ["none", "dust", "embers", "rain", "snow", "sparkle", "bubbles", "fog"] as const;
+export const PARTICLES = [
+  "none",
+  "dust",
+  "embers",
+  "rain",
+  "snow",
+  "sparkle",
+  "bubbles",
+  "fog",
+] as const;
 export type ParticleKind = (typeof PARTICLES)[number];
 
 export const STICKER_ANIMS = ["bob", "spin", "pulse", "pop", "drift"] as const;
@@ -106,6 +135,8 @@ export interface Scene {
   stickers?: Sticker[] | undefined;
   /** Mode edit: tampilan footage pembicara di adegan ini. */
   speaker?: SpeakerMode | undefined;
+  /** Arahan visual spesifik konten dari AI; opsional untuk project lama. */
+  visual?: VisualDirection | undefined;
 }
 
 export interface Composition {
@@ -145,7 +176,11 @@ export const DEFAULT_THEME: Theme = {
   particles: "none",
 };
 
-export function newComposition(title: string, aspect: Aspect = "9:16", mode: Mode = "explainer"): Composition {
+export function newComposition(
+  title: string,
+  aspect: Aspect = "9:16",
+  mode: Mode = "explainer",
+): Composition {
   const dim = ASPECT_DIMENSIONS[aspect];
   const now = Date.now();
   return {
@@ -192,7 +227,10 @@ export function normalizeComposition(raw: unknown): Composition {
       text: typeof s["text"] === "string" ? (s["text"] as string) : "",
       layout: oneOf(LAYOUTS, s["layout"], i === 0 ? "hook" : "icon"),
       transition: oneOf(TRANSITIONS, s["transition"], "fade"),
-      headline: typeof s["headline"] === "string" ? (s["headline"] as string) : (s["title"] as string | undefined),
+      headline:
+        typeof s["headline"] === "string"
+          ? (s["headline"] as string)
+          : (s["title"] as string | undefined),
       sub: s["sub"] as string | undefined,
       value: s["value"] as string | undefined,
       icon: s["icon"] as string | undefined,
@@ -200,6 +238,7 @@ export function normalizeComposition(raw: unknown): Composition {
       keywords: Array.isArray(s["keywords"]) ? (s["keywords"] as string[]) : undefined,
       stickers: Array.isArray(s["stickers"]) ? (s["stickers"] as Sticker[]) : undefined,
       speaker: s["speaker"] === undefined ? undefined : oneOf(SPEAKER_MODES, s["speaker"], "full"),
+      visual: s["visual"] as Scene["visual"],
     };
     return scene;
   });
@@ -215,7 +254,8 @@ export function normalizeComposition(raw: unknown): Composition {
     duration: Number(r["duration"]) || 0,
     scenes,
     theme,
-    stylePackId: typeof r["stylePackId"] === "string" ? (r["stylePackId"] as string) : "creator-explainer",
+    stylePackId:
+      typeof r["stylePackId"] === "string" ? (r["stylePackId"] as string) : "creator-explainer",
     subtitleOn: r["subtitleOn"] !== false,
     narration: typeof r["narration"] === "string" ? (r["narration"] as string) : undefined,
     aiDesigned: r["aiDesigned"] === true,

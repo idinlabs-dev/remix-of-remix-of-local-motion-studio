@@ -15,8 +15,20 @@ import {
   type Theme,
 } from "./types";
 import type { DesignPlan } from "@/lib/ai/schema";
+import { normalizeVisualDirection } from "./visual-direction";
 
-const NEUTRAL_ICONS: IconName[] = ["lightbulb", "sparkles", "target", "eye", "star", "zap", "compass", "brain", "rocket", "gem"];
+const NEUTRAL_ICONS: IconName[] = [
+  "lightbulb",
+  "sparkles",
+  "target",
+  "eye",
+  "star",
+  "zap",
+  "compass",
+  "brain",
+  "rocket",
+  "gem",
+];
 
 /** Kamus kata kunci → ikon (Indonesia + Inggris), untuk mode tanpa AI. */
 const KEYWORD_ICONS: [RegExp, IconName][] = [
@@ -74,22 +86,44 @@ export function guessIcon(text: string, index: number): IconName {
 }
 
 function shortPhrase(text: string, max = 6): string {
-  return text.replace(/[.!?…]+$/, "").split(/\s+/).slice(0, max).join(" ");
+  return text
+    .replace(/[.!?…]+$/, "")
+    .split(/\s+/)
+    .slice(0, max)
+    .join(" ");
 }
 
-const VERSUS_RE = /\s(?:vs\.?|versus|atau|bukan|dibanding(?:kan)?|sedangkan|melainkan|but|or|instead of)\s/i;
-const STEP_RE = /\b(pertama|kedua|ketiga|langkah|tahap|first|second|step|then|lalu|kemudian|akhirnya)\b/i;
+const VERSUS_RE =
+  /\s(?:vs\.?|versus|atau|bukan|dibanding(?:kan)?|sedangkan|melainkan|but|or|instead of)\s/i;
+const STEP_RE =
+  /\b(pertama|kedua|ketiga|langkah|tahap|first|second|step|then|lalu|kemudian|akhirnya)\b/i;
 const NUMBER_RE = /(-?\d[\d.,]*\s?%?)(\s+[\p{L}]+)?/u;
 
 /** Tebak pola layout universal dari isi kalimat — deterministik. */
-export function heuristicScene(text: string, index: number, total: number): Omit<Scene, "id" | "start" | "end" | "text"> {
+export function heuristicScene(
+  text: string,
+  index: number,
+  total: number,
+): Omit<Scene, "id" | "start" | "end" | "text"> {
   const transition = TRANSITIONS[index % TRANSITIONS.length] ?? "fade";
   const icon = guessIcon(text, index);
   if (index === 0) {
-    return { layout: "hook", transition: "zoom", headline: shortPhrase(text, 7), icon, keywords: [] };
+    return {
+      layout: "hook",
+      transition: "zoom",
+      headline: shortPhrase(text, 7),
+      icon,
+      keywords: [],
+    };
   }
   if (index === total - 1 && total > 2) {
-    return { layout: "outro", transition: "fade", headline: shortPhrase(text, 6), sub: "Follow untuk part berikutnya", icon: "heart" };
+    return {
+      layout: "outro",
+      transition: "fade",
+      headline: shortPhrase(text, 6),
+      sub: "Follow untuk part berikutnya",
+      icon: "heart",
+    };
   }
   const num = NUMBER_RE.exec(text);
   if (num && num[1] && /\d/.test(num[1])) {
@@ -117,21 +151,42 @@ export function heuristicScene(text: string, index: number, total: number): Omit
       };
     }
   }
-  const parts = text.split(/[,;:]/).map((p) => p.trim()).filter((p) => p.length > 2);
+  const parts = text
+    .split(/[,;:]/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 2);
   if (parts.length >= 3 || STEP_RE.test(text)) {
-    const items: SceneItem[] = parts.slice(0, 4).map((p, i) => ({ label: shortPhrase(p, 4), icon: guessIcon(p, index + i) }));
-    if (items.length >= 2) return { layout: STEP_RE.test(text) ? "timeline" : "list", transition, items, headline: undefined };
+    const items: SceneItem[] = parts
+      .slice(0, 4)
+      .map((p, i) => ({ label: shortPhrase(p, 4), icon: guessIcon(p, index + i) }));
+    if (items.length >= 2)
+      return {
+        layout: STEP_RE.test(text) ? "timeline" : "list",
+        transition,
+        items,
+        headline: undefined,
+      };
   }
   const cycle: LayoutKind[] = ["icon", "quote", "anatomy", "icon"];
   const layout = cycle[index % cycle.length] ?? "icon";
   if (layout === "anatomy" && parts.length >= 2) {
-    return { layout, transition, icon, headline: shortPhrase(parts[0] ?? text, 5), items: parts.slice(1, 5).map((p) => ({ label: shortPhrase(p, 3) })) };
+    return {
+      layout,
+      transition,
+      icon,
+      headline: shortPhrase(parts[0] ?? text, 5),
+      items: parts.slice(1, 5).map((p) => ({ label: shortPhrase(p, 3) })),
+    };
   }
   if (layout === "quote") return { layout, transition, keywords: [] };
   return { layout: "icon", transition, icon, headline: shortPhrase(text, 6) };
 }
 
-function genericEditScene(text: string, index: number, total: number): Omit<Scene, "id" | "start" | "end" | "text"> {
+function genericEditScene(
+  text: string,
+  index: number,
+  total: number,
+): Omit<Scene, "id" | "start" | "end" | "text"> {
   if (index % 3 === 2 && index !== total - 1) {
     return { ...heuristicScene(text, index, total), speaker: "pip" };
   }
@@ -140,22 +195,45 @@ function genericEditScene(text: string, index: number, total: number): Omit<Scen
     transition: index === 0 ? "zoom" : "fade",
     speaker: "full",
     headline: index === 0 ? shortPhrase(text, 5) : undefined,
-    stickers: index % 2 === 1 ? [{ icon: guessIcon(text, index), x: 0.82, y: 0.2, anim: "bob" }] : undefined,
+    stickers:
+      index % 2 === 1
+        ? [{ icon: guessIcon(text, index), x: 0.82, y: 0.2, anim: "bob" }]
+        : undefined,
   };
 }
 
 /** Adegan generik untuk satu kalimat. */
-export function genericScene(index: number, total: number, timing: TimedSentence, mode: Composition["mode"] = "explainer"): Scene {
-  const base = mode === "edit" ? genericEditScene(timing.text, index, total) : heuristicScene(timing.text, index, total);
-  return { id: crypto.randomUUID(), start: timing.start, end: timing.end, text: timing.text, ...base };
+export function genericScene(
+  index: number,
+  total: number,
+  timing: TimedSentence,
+  mode: Composition["mode"] = "explainer",
+): Scene {
+  const base =
+    mode === "edit"
+      ? genericEditScene(timing.text, index, total)
+      : heuristicScene(timing.text, index, total);
+  return {
+    id: crypto.randomUUID(),
+    start: timing.start,
+    end: timing.end,
+    text: timing.text,
+    ...base,
+  };
 }
 
 /** Isi comp.scenes dari daftar kalimat ber-waktu + jeda penutup. */
-export function scenesFromTimings(comp: Composition, timings: TimedSentence[], mediaDuration?: number): Composition {
+export function scenesFromTimings(
+  comp: Composition,
+  timings: TimedSentence[],
+  mediaDuration?: number,
+): Composition {
   const scenes = timings.map((t, i) => genericScene(i, timings.length, t, comp.mode));
   const last = timings[timings.length - 1];
   const duration =
-    comp.mode === "edit" && mediaDuration ? mediaDuration : (last ? last.end : 0) + OUTRO_HOLD_SECONDS;
+    comp.mode === "edit" && mediaDuration
+      ? mediaDuration
+      : (last ? last.end : 0) + OUTRO_HOLD_SECONDS;
   return { ...comp, scenes, duration, aiDesigned: false, updatedAt: Date.now() };
 }
 
@@ -200,10 +278,20 @@ export function applyDesign(comp: Composition, plan: DesignPlan): Composition {
             : (explicitIcon(scene.text) ?? guessIcon(it.label, i + itemIndex))),
       })),
       keywords: d.keywords,
-      stickers: d.stickers?.map((s) => ({ ...s, icon: explicitIcon(scene.text) ?? safeIcon(s.icon) })),
+      stickers: d.stickers?.map((s) => ({
+        ...s,
+        icon: explicitIcon(scene.text) ?? safeIcon(s.icon),
+      })),
       speaker: comp.mode === "edit" ? d.speaker : undefined,
+      visual: d.visual ? normalizeVisualDirection(d.visual) : undefined,
     };
     return next;
   });
-  return { ...comp, theme: mergeTheme(plan.theme), scenes, aiDesigned: true, updatedAt: Date.now() };
+  return {
+    ...comp,
+    theme: mergeTheme(plan.theme),
+    scenes,
+    aiDesigned: true,
+    updatedAt: Date.now(),
+  };
 }

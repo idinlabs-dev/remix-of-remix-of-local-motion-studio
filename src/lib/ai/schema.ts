@@ -15,6 +15,7 @@ import {
   TRANSITIONS,
   type Mode,
 } from "@/lib/engine/types";
+import { visualDirectionSchema } from "@/lib/engine/visual-direction";
 
 const shortText = (max: number) =>
   z
@@ -61,6 +62,7 @@ export const designSceneSchema = z.object({
     .optional()
     .catch(undefined),
   speaker: z.enum(SPEAKER_MODES).optional().catch(undefined),
+  visual: visualDirectionSchema.optional().catch(undefined),
 });
 
 export const designPlanSchema = z.object({
@@ -152,8 +154,35 @@ export const DESIGN_TOOL = {
               },
             },
             speaker: { type: "string", enum: [...SPEAKER_MODES] },
+            visual: {
+              type: "object",
+              properties: {
+                sceneType: { type: "string" },
+                subject: { type: "string" },
+                visualConcept: { type: "string" },
+                objects: { type: "array", items: { type: "string" } },
+                beats: { type: "array", items: { type: "string" } },
+                visualMetaphor: { type: "string" },
+                keywordCues: { type: "array", items: { type: "string" } },
+                composition: { type: "string" },
+                motion: { type: "string" },
+                expression: { type: "string" },
+                avoid: { type: "array", items: { type: "string" } },
+              },
+              required: [
+                "sceneType",
+                "subject",
+                "visualConcept",
+                "objects",
+                "beats",
+                "visualMetaphor",
+                "keywordCues",
+                "composition",
+                "motion",
+              ],
+            },
           },
-          required: ["layout", "transition"],
+          required: ["layout", "transition", "visual"],
         },
       },
     },
@@ -192,12 +221,15 @@ LANGKAH BERPIKIR:
    - list: beberapa poin → items 2-5 {label, icon}.
    - icon: satu konsep utama → icon besar + headline + sub opsional.
    - outro: penutup → headline + sub sebagai CTA (mis. "Follow untuk part 2").
-5. Tambahkan stickers (0-2, kadang 3) berupa objek ikon animasi yang relevan dengan kalimat agar visual tidak membosankan. Posisi x,y 0..1; hindari tengah (0.3-0.7) agar tidak menutupi konten, hindari y > 0.75 (zona subtitle).
-6. keywords: 1-3 kata dari kalimat itu yang paling penting untuk disorot di subtitle (tulis persis seperti di kalimat).
-7. transition bervariasi: zoom untuk hook, wipe/slide untuk pergantian topik, glitch hanya untuk tema gelap/teknologi, fade untuk tenang.
+5. Sebelum memilih layout, tulis visual direction khusus untuk scene itu. Tentukan subject nyata, objek konkret, visual metaphor, beat gerak, komposisi, ekspresi, dan motion yang dapat diterjemahkan menjadi kode Remotion.
+6. Field visual.objects wajib berisi benda atau karakter yang benar-benar terlihat. Field visual.beats wajib menjelaskan perubahan visual yang terjadi, bukan sekadar mengulang narasi. Field visual.avoid wajib mencantumkan fallback generik yang tidak boleh dipakai bila tidak sesuai konteks.
+7. Tambahkan stickers (0-2, kadang 3) berupa objek ikon animasi yang relevan dengan kalimat agar visual tidak membosankan. Posisi x,y 0..1; hindari tengah (0.3-0.7) agar tidak menutupi konten, hindari y > 0.75 (zona subtitle).
+8. keywords: 1-3 kata dari kalimat itu yang paling penting untuk disorot di subtitle (tulis persis seperti di kalimat).
+9. transition bervariasi: zoom untuk hook, wipe/slide untuk pergantian topik, glitch hanya untuk tema gelap/teknologi, fade untuk tenang.
 ${editRules}
 
 ATURAN TEKS: semua teks (headline, sub, label) memakai BAHASA YANG SAMA dengan narasi, singkat & punchy (headline maks 7 kata, label maks 4 kata). Jangan mengarang fakta di luar narasi.
+ATURAN VISUAL KHUSUS: setiap scene wajib mengisi field visual. Jangan mengirim visual direction generik yang sama untuk semua scene. Visual scene harus mengikuti noun, mekanisme, joke, atau perubahan makna dalam kalimat.
 ATURAN IKON & RELEVANSI: field icon/items[].icon/stickers[].icon HANYA boleh dari daftar ini: ${ICON_NAMES.join(", ")}.
 - Ikon utama wajib mewakili benda, proses, atau konsep konkret yang benar-benar disebut/diterangkan pada kalimat scene yang sama. Jangan memilih ikon hanya karena topik umumnya mirip.
 - Setiap item harus punya label dan ikon yang saling cocok. Untuk kalimat tentang mekanisme fisik, pilih objek/proses mekanismenya (mis. piston/mesin → cog, bahan bakar → fuel, panas/pembakaran → flame, tekanan → gauge), bukan simbol salju/planet/atom yang tak disebut.
