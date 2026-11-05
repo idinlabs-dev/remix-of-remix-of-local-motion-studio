@@ -6,9 +6,9 @@ import { zipSync, strToU8 } from "fflate";
 
 import type { Composition } from "@/lib/engine/types";
 import { FONT_DISPLAY } from "@/lib/engine/themes";
+import { defaultPaperCutManifest } from "./papercut/manifest";
 import {
   composeGeneratedProject,
-  defaultGeneratedManifest,
   validateGeneratedProject,
   type GeneratedProjectSource,
 } from "./generated-project";
@@ -42,15 +42,15 @@ const PACKAGE_JSON = (title: string) =>
       private: true,
       scripts: {
         studio: "remotion studio",
-        render: "remotion render Main out/video.mp4",
+        render: "remotion render src/index.ts Main out/video.mp4 --codec=h264",
       },
       dependencies: {
-        "@remotion/cli": "^4.0.0",
-        "@remotion/google-fonts": "^4.0.0",
+        "@remotion/cli": "4.0.250",
+        "@remotion/google-fonts": "4.0.250",
         "lucide-react": "^0.460.0",
-        react: "^18.3.1",
-        "react-dom": "^18.3.1",
-        remotion: "^4.0.0",
+        react: "18.3.1",
+        "react-dom": "18.3.1",
+        remotion: "4.0.250",
       },
       devDependencies: { "@types/react": "^18.3.0", typescript: "^5.5.0" },
     },
@@ -327,7 +327,12 @@ export async function buildRemotionZip(
     options.generatedSource ??
     composeGeneratedProject(
       comp,
-      options.generatedManifest ?? defaultGeneratedManifest(comp),
+      options.generatedManifest ??
+        defaultPaperCutManifest({
+          title: comp.title,
+          mode: comp.mode,
+          scenes: comp.scenes.map((s) => ({ id: s.id, text: s.text, keywords: s.keywords })),
+        }),
       timeline,
     );
   const validation = validateGeneratedProject(generated);
