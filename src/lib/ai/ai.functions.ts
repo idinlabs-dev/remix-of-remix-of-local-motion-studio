@@ -17,7 +17,12 @@ import {
   generatedProjectPrompt,
   parseGeneratedManifest,
 } from "./generated-project-schema";
-import type { GeneratedProjectManifest } from "@/lib/export/generated-project";
+import type { AnyGeneratedManifest } from "@/lib/export/generated-project";
+import {
+  PAPERCUT_PROJECT_TOOL,
+  paperCutPrompt,
+  parsePaperCutManifest,
+} from "./papercut-schema";
 
 const codeField = z.string().min(16).max(160);
 
@@ -120,6 +125,8 @@ export const generateRemotionProject = createServerFn({ method: "POST" })
         title: z.string().min(1).max(120),
         mode: z.enum(["explainer", "edit"]),
         aspect: z.string().max(8),
+        /** "papercut" (default): lapisan paper-cut dari pustaka komponen. "classic": 14 visualKind lama. */
+        style: z.enum(["papercut", "classic"]).default("papercut"),
         scenes: z
           .array(
             z.object({
@@ -138,7 +145,7 @@ export const generateRemotionProject = createServerFn({ method: "POST" })
     async ({
       data,
     }): Promise<
-      | { ok: true; manifest: GeneratedProjectManifest }
+      | { ok: true; manifest: AnyGeneratedManifest; repaired?: number }
       | { ok: false; reason: AiFailReason; message: string }
     > => {
       const parsed = parseAccessCode(data.code);
@@ -151,6 +158,22 @@ export const generateRemotionProject = createServerFn({ method: "POST" })
         };
       const { callClaudeTool, extractJson, KieError } = await import("./kie.server");
       try {
+        if (data.style === "papercut") {
+          const out = await callClaudeTool(
+            parsed.key,
+            paperCutPrompt(data),
+            PAPERCUT_PROJECT_TOOL,
+            16000,
+          );
+          const candidate = out.toolInput ?? extractJson(out.text);
+          // Selalu valid: layer/scene yang rusak dari AI diganti heuristik (repaired = jumlah perbaikan).
+          const { manifest, repaired } = parsePaperCutManifest(candidate, {
+            title: data.title,
+            mode: data.mode,
+            scenes: data.scenes,
+          });
+          return { ok: true, manifest, repaired };
+        }
         const out = await callClaudeTool(
           parsed.key,
           generatedProjectPrompt(data),

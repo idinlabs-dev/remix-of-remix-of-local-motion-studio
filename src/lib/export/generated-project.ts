@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { Composition } from "@/lib/engine/types";
+import { composePaperCutProject } from "./papercut/compose";
+import { paperCutManifestSchema, type PaperCutManifest } from "./papercut/manifest";
 
 export const VISUAL_KINDS = [
   "ritual",
@@ -37,8 +39,9 @@ export const generatedProjectManifestSchema = z.object({
   scenes: z.array(sceneDesignSchema).min(1).max(120),
 });
 export type GeneratedProjectManifest = z.infer<typeof generatedProjectManifestSchema>;
+export type AnyGeneratedManifest = GeneratedProjectManifest | PaperCutManifest;
 export interface GeneratedProjectSource {
-  manifest: GeneratedProjectManifest;
+  manifest: AnyGeneratedManifest;
   files: Record<string, string>;
 }
 
@@ -50,8 +53,15 @@ export function validateGeneratedProject(
   source: GeneratedProjectSource,
 ): { ok: true } | { ok: false; errors: string[] } {
   const errors: string[] = [];
-  if (!generatedProjectManifestSchema.safeParse(source.manifest).success)
+  const isV2 = (source.manifest as { version?: number }).version === 2;
+  if (
+    !(isV2
+      ? paperCutManifestSchema.safeParse(source.manifest).success
+      : generatedProjectManifestSchema.safeParse(source.manifest).success)
+  )
     errors.push("manifest tidak sesuai schema");
+  if (isV2 && typeof source.files["src/PaperCut.tsx"] !== "string")
+    errors.push("file wajib hilang: src/PaperCut.tsx");
   for (const required of REQUIRED)
     if (typeof source.files[required] !== "string" || !source.files[required].trim())
       errors.push(`file wajib hilang: ${required}`);
@@ -87,9 +97,11 @@ export const Main: React.FC<{ timeline: any }> = ({ timeline }) => { const { fps
 
 export function composeGeneratedProject(
   comp: Composition,
-  manifest: GeneratedProjectManifest,
+  manifest: AnyGeneratedManifest,
   timeline: unknown,
 ): GeneratedProjectSource {
+  if ((manifest as { version?: number }).version === 2)
+    return composePaperCutProject(comp, manifest as PaperCutManifest, timeline);
   const safe = generatedProjectManifestSchema.parse(manifest);
   const designLiteral = JSON.stringify(safe.scenes, null, 2);
   const video = `import React from "react";
